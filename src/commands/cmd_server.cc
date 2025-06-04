@@ -309,6 +309,61 @@ class CommandDBSize : public Commander {
   }
 };
 
+class CommandKProfile : public Commander {
+ public:
+  Status Parse(const std::vector<std::string> &args) override {
+    CommandParser parser(args, 1);
+    if (!parser.EatEqICase("memory")) {
+      return {Status::NotOK, "only supports MEMORY subcommand"};
+    }
+    if (parser.EatEqICase("enable")) {
+      op_ = "enable";
+    } else if (parser.EatEqICase("disable")) {
+      op_ = "disable";
+    } else if (parser.EatEqICase("status")) {
+      op_ = "status";
+    } else if (parser.EatEqICase("dump")) {
+      op_ = "dump";
+      if (!parser.Good()) return {Status::NotOK, errWrongNumOfArguments};
+      dump_dir_ = GET_OR_RET(parser.TakeStr());
+    } else {
+      return {Status::NotOK, "MEMORY subcommand must be one of ENABLE, DISABLE, STATUS, DUMP"};
+    }
+    if (parser.Good()) {
+      return {Status::NotOK, errWrongNumOfArguments};
+    }
+    return Status::OK();
+  }
+
+  Status Execute([[maybe_unused]] engine::Context &ctx, Server *srv, [[maybe_unused]] Connection *conn,
+                 std::string *output) override {
+    Status s;
+    if (op_ == "enable" || op_ == "disable") {
+      s = srv->memory_profiler.SetProfiling(op_ == "enable");
+    } else if (op_ == "status") {
+      auto enabled = GET_OR_RET(srv->memory_profiler.GetProfilingStatus());
+      *output = SimpleString(enabled ? "enabled" : "disabled");
+      return Status::OK();
+    } else if (op_ == "dump") {
+      bool is_dir = false;
+      if (auto s = rocksdb::Env::Default()->IsDirectory(dump_dir_, &is_dir); !s.ok()) {
+        return {Status::NotOK, fmt::format("\"{}\" is not a directory", dump_dir_)};
+      }
+      s = srv->memory_profiler.Dump(dump_dir_);
+    } else {
+      return {Status::NotOK, "MEMORY subcommand must be one of ENABLE, DISABLE, STATUS, DUMP"};
+    }
+
+    if (!s.IsOK()) return s;
+    *output = RESP_OK;
+    return Status::OK();
+  }
+
+ private:
+  std::string op_;
+  std::string dump_dir_;
+};
+
 class CommandPerfLog : public Commander {
  public:
   Status Parse(const std::vector<std::string> &args) override {
@@ -1450,6 +1505,7 @@ REDIS_REGISTER_COMMANDS(Server, MakeCmdAttr<CommandAuth>("auth", 2, "read-only o
                         MakeCmdAttr<CommandFlushAll>("flushall", 1, "write no-dbsize-check exclusive admin", NO_KEY),
                         MakeCmdAttr<CommandDBSize>("dbsize", -1, "read-only", NO_KEY),
                         MakeCmdAttr<CommandSlowlog>("slowlog", -2, "read-only", NO_KEY),
+                        MakeCmdAttr<CommandKProfile>("kprofile", -3, "read-only admin", NO_KEY),
                         MakeCmdAttr<CommandPerfLog>("perflog", -2, "read-only", NO_KEY),
                         MakeCmdAttr<CommandClient>("client", -2, "read-only", NO_KEY),
                         MakeCmdAttr<CommandMonitor>("monitor", 1, "read-only no-multi no-script", NO_KEY),
