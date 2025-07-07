@@ -28,7 +28,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestWait(t *testing.T) {
+func TestWaitCommand(t *testing.T) {
 	srv := util.StartServer(t, map[string]string{})
 	defer srv.Close()
 
@@ -36,58 +36,52 @@ func TestWait(t *testing.T) {
 	rdb := srv.NewClient()
 	defer func() { require.NoError(t, rdb.Close()) }()
 
-	t.Run("WAIT command basic functionality", func(t *testing.T) {
-		// Test with no replicas - should return immediately
-		r := rdb.Do(ctx, "WAIT", "1", "1000")
-		require.NoError(t, r.Err())
-		require.Equal(t, int64(0), r.Val())
-
-		// Test with timeout 0 - should return immediately
-		r = rdb.Do(ctx, "WAIT", "1", "0")
-		require.NoError(t, r.Err())
-		require.Equal(t, int64(0), r.Val())
+	t.Run("WAIT with no replicas should return immediately", func(t *testing.T) {
+		// WAIT 1 should return immediately since there are no replicas
+		result := rdb.Do(ctx, "WAIT", "1")
+		require.NoError(t, result.Err())
+		require.Equal(t, int64(0), result.Val())
 	})
 
-	t.Run("WAIT command with invalid arguments", func(t *testing.T) {
-		// Test with wrong number of arguments
-		r := rdb.Do(ctx, "WAIT", "1")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "wrong number of arguments")
-
-		r = rdb.Do(ctx, "WAIT", "1", "1000", "extra")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "wrong number of arguments")
-
-		// Test with invalid numreplicas
-		r = rdb.Do(ctx, "WAIT", "invalid", "1000")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "should be a positive integer")
-
-		r = rdb.Do(ctx, "WAIT", "-1", "1000")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "should be a positive integer")
-
-		// Test with invalid timeout
-		r = rdb.Do(ctx, "WAIT", "1", "invalid")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "should be a positive integer")
-
-		r = rdb.Do(ctx, "WAIT", "1", "-1")
-		require.Error(t, r.Err())
-		require.Contains(t, r.Err().Error(), "should be a positive integer")
+	t.Run("WAIT with negative number should return error", func(t *testing.T) {
+		result := rdb.Do(ctx, "WAIT", "-1")
+		require.Error(t, result.Err())
+		require.Contains(t, result.Err().Error(), "numreplicas should be a positive integer")
 	})
 
-	t.Run("WAIT command timeout behavior", func(t *testing.T) {
-		// Test timeout behavior - should return after timeout with 0 replicas
-		start := time.Now()
-		r := rdb.Do(ctx, "WAIT", "1", "100") // 100ms timeout
-		require.NoError(t, r.Err())
-		require.Equal(t, int64(0), r.Val())
-		duration := time.Since(start)
+	t.Run("WAIT with invalid arguments should return error", func(t *testing.T) {
+		result := rdb.Do(ctx, "WAIT")
+		require.Error(t, result.Err())
+		require.Contains(t, result.Err().Error(), "wrong number of arguments")
 
-		// Should take at least 100ms
-		require.GreaterOrEqual(t, duration, 100*time.Millisecond)
-		// But should not take too long
-		require.Less(t, duration, 500*time.Millisecond)
+		result = rdb.Do(ctx, "WAIT", "1", "1000")
+		require.Error(t, result.Err())
+		require.Contains(t, result.Err().Error(), "wrong number of arguments")
+	})
+
+	t.Run("WAIT should work with valid arguments", func(t *testing.T) {
+		// This should return immediately since there are no replicas
+		result := rdb.Do(ctx, "WAIT", "2")
+		require.NoError(t, result.Err())
+		require.Equal(t, int64(0), result.Val())
+	})
+
+	t.Run("WAIT should not block indefinitely", func(t *testing.T) {
+		// Start a goroutine to execute WAIT
+		done := make(chan bool, 1)
+		go func() {
+			result := rdb.Do(ctx, "WAIT", "1")
+			require.NoError(t, result.Err())
+			require.Equal(t, int64(0), result.Val())
+			done <- true
+		}()
+
+		// Wait for the command to complete (should be immediate)
+		select {
+		case <-done:
+			// Success - command completed immediately
+		case <-time.After(5 * time.Second):
+			t.Fatal("WAIT command blocked indefinitely")
+		}
 	})
 }
