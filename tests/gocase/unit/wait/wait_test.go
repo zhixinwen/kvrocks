@@ -29,50 +29,48 @@ import (
 )
 
 func TestWaitCommand(t *testing.T) {
-	srv := util.StartServer(t, map[string]string{})
-	defer srv.Close()
+	// Start master server
+	masterSrv := util.StartServer(t, map[string]string{})
+	defer masterSrv.Close()
+
+	// Start slave server
+	slaveSrv := util.StartServer(t, map[string]string{})
+	defer slaveSrv.Close()
 
 	ctx := context.Background()
-	rdb := srv.NewClient()
-	defer func() { require.NoError(t, rdb.Close()) }()
+	masterRdb := masterSrv.NewClient()
+	defer func() { require.NoError(t, masterRdb.Close()) }()
 
-	t.Run("WAIT with no replicas should return immediately", func(t *testing.T) {
-		// WAIT 1 should return immediately since there are no replicas
-		result := rdb.Do(ctx, "WAIT", "1")
-		require.NoError(t, result.Err())
-		require.Equal(t, int64(0), result.Val())
-	})
+	slaveRdb := slaveSrv.NewClient()
+	defer func() { require.NoError(t, slaveRdb.Close()) }()
+
+	// Set up replication
+	util.SlaveOf(t, slaveRdb, masterSrv)
+	util.WaitForSync(t, slaveRdb)
 
 	t.Run("WAIT with negative number should return error", func(t *testing.T) {
-		result := rdb.Do(ctx, "WAIT", "-1")
+		result := masterRdb.Do(ctx, "WAIT", "-1")
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "numreplicas should be a positive integer")
 	})
 
 	t.Run("WAIT with invalid arguments should return error", func(t *testing.T) {
-		result := rdb.Do(ctx, "WAIT")
+		result := masterRdb.Do(ctx, "WAIT")
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "wrong number of arguments")
 
-		result = rdb.Do(ctx, "WAIT", "1", "1000")
+		result = masterRdb.Do(ctx, "WAIT", "1", "1000")
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "wrong number of arguments")
-	})
-
-	t.Run("WAIT should work with valid arguments", func(t *testing.T) {
-		// This should return immediately since there are no replicas
-		result := rdb.Do(ctx, "WAIT", "2")
-		require.NoError(t, result.Err())
-		require.Equal(t, int64(0), result.Val())
 	})
 
 	t.Run("WAIT should not block indefinitely", func(t *testing.T) {
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
 		go func() {
-			result := rdb.Do(ctx, "WAIT", "1")
+			result := masterRdb.Do(ctx, "WAIT", "1")
 			require.NoError(t, result.Err())
-			require.Equal(t, int64(0), result.Val())
+			require.Equal(t, int64(1), result.Val())
 			done <- true
 		}()
 
@@ -82,6 +80,37 @@ func TestWaitCommand(t *testing.T) {
 			// Success - command completed immediately
 		case <-time.After(5 * time.Second):
 			t.Fatal("WAIT command blocked indefinitely")
+		}
+	})
+
+	t.Run("WAIT should block until enough replicas acknowledge", func(t *testing.T) {
+		// Disconnect the slave
+		slaveSrv.Close()
+
+		// Start a goroutine to execute WAIT
+		done := make(chan bool, 1)
+		go func() {
+			result := masterRdb.Do(ctx, "WAIT", "1")
+			require.NoError(t, result.Err())
+			require.Equal(t, int64(1), result.Val())
+			done <- true
+		}()
+
+		// Wait a bit to ensure WAIT is blocked
+		time.Sleep(100 * time.Millisecond)
+
+		// Restart slave and reconnect
+		slaveSrv.Start()
+		slaveRdb = slaveSrv.NewClient()
+		util.SlaveOf(t, slaveRdb, masterSrv)
+		util.WaitForSync(t, slaveRdb)
+
+		// Now WAIT should complete
+		select {
+		case <-done:
+			// Success - command completed after replica connected
+		case <-time.After(5 * time.Second):
+			t.Fatal("WAIT command did not complete after replica connected")
 		}
 	})
 }
