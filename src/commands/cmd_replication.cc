@@ -344,10 +344,77 @@ class CommandDBName : public Commander {
   }
 };
 
+class CommandWait : public Commander {
+ public:
+  Status Parse(const std::vector<std::string> &args) override {
+    // WAIT numreplicas timeout
+    if (args.size() != 3) {
+      return {Status::RedisParseErr, errWrongNumOfArguments};
+    }
+
+    auto num_replicas_result = ParseInt<int>(args[1], 10);
+    if (!num_replicas_result) {
+      return {Status::RedisParseErr, "numreplicas should be a positive integer"};
+    }
+    num_replicas_ = *num_replicas_result;
+    if (num_replicas_ < 0) {
+      return {Status::RedisParseErr, "numreplicas should be a positive integer"};
+    }
+
+    auto timeout_result = ParseInt<int64_t>(args[2], 10);
+    if (!timeout_result) {
+      return {Status::RedisParseErr, "timeout should be a positive integer"};
+    }
+    timeout_ms_ = *timeout_result;
+    if (timeout_ms_ < 0) {
+      return {Status::RedisParseErr, "timeout should be a positive integer"};
+    }
+
+    return Commander::Parse(args);
+  }
+
+  Status Execute([[maybe_unused]] engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    // Only master can execute WAIT command
+    if (srv->IsSlave()) {
+      return {Status::RedisExecErr, "WAIT command can only be executed on master"};
+    }
+
+    // Get current sequence number
+    auto current_seq = srv->storage->LatestSeqNumber();
+    
+    // Check if we already have enough replicas at the current sequence
+    int reached_replicas = srv->GetReplicasReachedSequence(current_seq);
+
+    // If we already have enough replicas, return immediately
+    if (reached_replicas >= num_replicas_) {
+      *output = redis::Integer(reached_replicas);
+      return Status::OK();
+    }
+
+    // If timeout is 0, return immediately with current replica count
+    if (timeout_ms_ == 0) {
+      *output = redis::Integer(reached_replicas);
+      return Status::OK();
+    }
+
+    // Block the connection and wait for replicas to catch up
+    srv->BlockOnWait(conn, current_seq, num_replicas_, timeout_ms_);
+    
+    // The connection will be woken up by WakeupWaitConnections when enough replicas
+    // have reached the target sequence or when timeout occurs
+    return {Status::BlockingCmd};
+  }
+
+ private:
+  int num_replicas_ = 0;
+  int64_t timeout_ms_ = 0;
+};
+
 REDIS_REGISTER_COMMANDS(Replication, MakeCmdAttr<CommandReplConf>("replconf", -3, "read-only no-script", NO_KEY),
                         MakeCmdAttr<CommandPSync>("psync", -2, "read-only no-multi no-script", NO_KEY),
                         MakeCmdAttr<CommandFetchMeta>("_fetch_meta", 1, "read-only no-multi no-script", NO_KEY),
                         MakeCmdAttr<CommandFetchFile>("_fetch_file", 2, "read-only no-multi no-script", NO_KEY),
-                        MakeCmdAttr<CommandDBName>("_db_name", 1, "read-only no-multi", NO_KEY), )
+                        MakeCmdAttr<CommandDBName>("_db_name", 1, "read-only no-multi", NO_KEY),
+                        MakeCmdAttr<CommandWait>("wait", 3, "read-only blocking", NO_KEY), )
 
 }  // namespace redis

@@ -44,6 +44,7 @@
 #include "fmt/format.h"
 #include "logging.h"
 #include "redis_connection.h"
+#include "redis_reply.h"
 #include "rocksdb/version.h"
 #include "storage/compaction_checker.h"
 #include "storage/redis_db.h"
@@ -698,6 +699,96 @@ void Server::OnEntryAddedToStream(const std::string &ns, const std::string &key,
       ++it;
     }
   }
+}
+
+void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas, int64_t timeout_ms) {
+  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+  
+  wait_contexts_.emplace_back(conn, target_seq, num_replicas, timeout_ms);
+  IncrBlockedClientNum();
+}
+
+void Server::UnblockOnWait(redis::Connection *conn) {
+  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+  
+  for (auto it = wait_contexts_.begin(); it != wait_contexts_.end(); ++it) {
+    if (it->conn == conn) {
+      wait_contexts_.erase(it);
+      DecrBlockedClientNum();
+      break;
+    }
+  }
+}
+
+void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
+  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+  
+  auto now_ms = util::GetTimeStamp<std::chrono::milliseconds>();
+  
+  for (auto it = wait_contexts_.begin(); it != wait_contexts_.end();) {
+    // Check timeout first
+    if (it->timeout_ms > 0 && (now_ms - it->start_time_ms) >= it->timeout_ms) {
+      // Timeout occurred, wake up the connection
+      // Count how many replicas have reached the target sequence at timeout
+      int reached_replicas = GetReplicasReachedSequence(it->target_seq);
+      
+      // Send the response with the number of replicas that have reached the target sequence
+      it->conn->Reply(redis::Integer(reached_replicas));
+      
+      auto s = it->conn->Owner()->EnableWriteEvent(it->conn->GetFD());
+      if (!s.IsOK()) {
+        error("[server] Failed to enable write event on timed out WAIT connection {}: {}", it->conn->GetFD(), s.Msg());
+      }
+      it = wait_contexts_.erase(it);
+      DecrBlockedClientNum();
+      continue;
+    }
+    
+    // Check if target sequence is reached
+    if (seq >= it->target_seq) {
+      // Count how many replicas have reached the target sequence
+      int reached_replicas = GetReplicasReachedSequence(it->target_seq);
+      
+      // If enough replicas have reached the target sequence, wake up the connection
+      if (reached_replicas >= it->num_replicas) {
+        // Send the response with the number of replicas that have reached the target sequence
+        it->conn->Reply(redis::Integer(reached_replicas));
+        
+        auto s = it->conn->Owner()->EnableWriteEvent(it->conn->GetFD());
+        if (!s.IsOK()) {
+          error("[server] Failed to enable write event on WAIT connection {}: {}", it->conn->GetFD(), s.Msg());
+        }
+        it = wait_contexts_.erase(it);
+        DecrBlockedClientNum();
+        continue;
+      }
+    }
+    
+    ++it;
+  }
+}
+
+void Server::CleanupWaitConnection(redis::Connection *conn) {
+  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+  
+  for (auto it = wait_contexts_.begin(); it != wait_contexts_.end(); ++it) {
+    if (it->conn == conn) {
+      wait_contexts_.erase(it);
+      DecrBlockedClientNum();
+      break;
+    }
+  }
+}
+
+int Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
+  std::lock_guard<std::mutex> slave_guard(slave_threads_mu_);
+  int reached_replicas = 0;
+  for (const auto &slave : slave_threads_) {
+    if (!slave->IsStopped() && slave->GetCurrentReplSeq() >= target_seq) {
+      reached_replicas++;
+    }
+  }
+  return reached_replicas;
 }
 
 void Server::updateCachedTime() { unix_time_secs.store(util::GetTimeStamp()); }
