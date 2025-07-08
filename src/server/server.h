@@ -234,7 +234,7 @@ class Server {
   void BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas);
   void WakeupWaitConnections(rocksdb::SequenceNumber seq);
   void CleanupWaitConnection(redis::Connection *conn);
-  
+
   // Helper methods for WAIT command
   int GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq);
 

@@ -367,7 +367,7 @@ class CommandWait : public Commander {
 
     // Get current sequence number
     auto current_seq = srv->storage->LatestSeqNumber();
-    
+
     // Check if we already have enough replicas at the current sequence
     int reached_replicas = srv->GetReplicasReachedSequence(current_seq);
 
@@ -379,7 +379,7 @@ class CommandWait : public Commander {
 
     // Block the connection and wait for replicas to catch up
     srv->BlockOnWait(conn, current_seq, num_replicas_);
-    
+
     // The connection will be woken up by WakeupWaitConnections when enough replicas
     // have reached the target sequence
     return {Status::BlockingCmd};

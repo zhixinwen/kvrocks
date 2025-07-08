@@ -68,9 +68,10 @@ func TestWaitCommand(t *testing.T) {
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
 		go func() {
-			result := masterRdb.Do(ctx, "WAIT", "1")
-			require.NoError(t, result.Err())
-			require.Equal(t, int64(1), result.Val())
+			require.NoError(t, masterRdb.Do(ctx, "MULTI").Err())
+			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
+			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+			require.Equal(t, int64(1), masterRdb.Do(ctx, "EXEC").Val())
 			done <- true
 		}()
 
@@ -89,15 +90,30 @@ func TestWaitCommand(t *testing.T) {
 
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
+		waitCalled := make(chan bool, 1)
 		go func() {
-			result := masterRdb.Do(ctx, "WAIT", "1")
-			require.NoError(t, result.Err())
-			require.Equal(t, int64(1), result.Val())
+			require.NoError(t, masterRdb.Do(ctx, "MULTI").Err())
+			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
+			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+			waitCalled <- true
+			require.Equal(t, int64(1), masterRdb.Do(ctx, "EXEC").Val())
 			done <- true
 		}()
 
-		// Wait a bit to ensure WAIT is blocked
-		time.Sleep(100 * time.Millisecond)
+		// Wait for WAIT to be called
+		select {
+		case <-waitCalled:
+			// Success - WAIT was called
+		case <-time.After(5 * time.Second):
+			t.Fatal("WAIT command did not call WAIT after 5 seconds")
+		}
+
+		select {
+		case <-done:
+			t.Fatal("WAIT command did not complete after replica connected")
+		default:
+			// Success - command is blocked
+		}
 
 		// Restart slave and reconnect
 		slaveSrv.Start()

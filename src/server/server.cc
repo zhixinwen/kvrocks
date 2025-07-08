@@ -703,25 +703,25 @@ void Server::OnEntryAddedToStream(const std::string &ns, const std::string &key,
 
 void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
-  
+
   wait_contexts_.emplace_back(conn, target_seq, num_replicas);
   IncrBlockedClientNum();
 }
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
-  
+
   for (auto it = wait_contexts_.begin(); it != wait_contexts_.end();) {
     // Check if target sequence is reached
     if (seq >= it->target_seq) {
       // Count how many replicas have reached the target sequence
       int reached_replicas = GetReplicasReachedSequence(it->target_seq);
-      
+
       // If enough replicas have reached the target sequence, wake up the connection
       if (reached_replicas >= it->num_replicas) {
         // Send the response with the number of replicas that have reached the target sequence
         it->conn->Reply(redis::Integer(reached_replicas));
-        
+
         auto s = it->conn->Owner()->EnableWriteEvent(it->conn->GetFD());
         if (!s.IsOK()) {
           error("[server] Failed to enable write event on WAIT connection {}: {}", it->conn->GetFD(), s.Msg());
@@ -731,16 +731,16 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
         continue;
       }
     }
-    
+
     ++it;
   }
 }
 
 void Server::CleanupWaitConnection(redis::Connection *conn) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
-  
+
   auto it = std::find_if(wait_contexts_.begin(), wait_contexts_.end(),
-                         [conn](const auto& context) { return context.conn == conn; });
+                         [conn](const auto &context) { return context.conn == conn; });
   if (it != wait_contexts_.end()) {
     wait_contexts_.erase(it);
     DecrBlockedClientNum();
