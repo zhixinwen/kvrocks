@@ -708,18 +708,6 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
   IncrBlockedClientNum();
 }
 
-void Server::UnblockOnWait(redis::Connection *conn) {
-  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
-  
-  for (auto it = wait_contexts_.begin(); it != wait_contexts_.end(); ++it) {
-    if (it->conn == conn) {
-      wait_contexts_.erase(it);
-      DecrBlockedClientNum();
-      break;
-    }
-  }
-}
-
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
   
@@ -751,12 +739,11 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 void Server::CleanupWaitConnection(redis::Connection *conn) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
   
-  for (auto it = wait_contexts_.begin(); it != wait_contexts_.end(); ++it) {
-    if (it->conn == conn) {
-      wait_contexts_.erase(it);
-      DecrBlockedClientNum();
-      break;
-    }
+  auto it = std::find_if(wait_contexts_.begin(), wait_contexts_.end(),
+                         [conn](const auto& context) { return context.conn == conn; });
+  if (it != wait_contexts_.end()) {
+    wait_contexts_.erase(it);
+    DecrBlockedClientNum();
   }
 }
 

@@ -232,7 +232,6 @@ class Server {
 
   // WAIT command infrastructure
   void BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas);
-  void UnblockOnWait(redis::Connection *conn);
   void WakeupWaitConnections(rocksdb::SequenceNumber seq);
   void CleanupWaitConnection(redis::Connection *conn);
   
