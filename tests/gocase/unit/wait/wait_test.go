@@ -71,7 +71,7 @@ func TestWaitCommand(t *testing.T) {
 			require.NoError(t, masterRdb.Do(ctx, "MULTI").Err())
 			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
 			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
-			require.Equal(t, int64(1), masterRdb.Do(ctx, "EXEC").Val())
+			require.Equal(t, []interface{}([]interface{}{"OK", int64(1)}), masterRdb.Do(ctx, "EXEC").Val())
 			done <- true
 		}()
 
@@ -94,7 +94,7 @@ func TestWaitCommand(t *testing.T) {
 			require.NoError(t, masterRdb.Do(ctx, "MULTI").Err())
 			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
 			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
-			require.Equal(t, int64(1), masterRdb.Do(ctx, "EXEC").Val())
+			require.Equal(t, []interface{}([]interface{}{"OK", int64(1)}), masterRdb.Do(ctx, "EXEC").Val())
 			done <- true
 		}()
 
