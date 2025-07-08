@@ -119,4 +119,68 @@ func TestWaitCommand(t *testing.T) {
 			t.Fatal("WAIT command did not complete after replica connected")
 		}
 	})
+
+	t.Run("WAIT in script should not block indefinitely", func(t *testing.T) {
+		// Create a Lua script that uses WAIT
+		script := `
+			redis.call('SET', 'k1', 'v1')
+			return redis.call('WAIT', 1)
+		`
+
+		// Start a goroutine to execute the script
+		done := make(chan bool, 1)
+		go func() {
+			result := masterRdb.Eval(ctx, script, []string{})
+			require.NoError(t, result.Err())
+			done <- true
+		}()
+
+		// Wait for the script to complete (should be immediate)
+		select {
+		case <-done:
+			// Success - script completed immediately
+		case <-time.After(5 * time.Second):
+			t.Fatal("WAIT in script blocked indefinitely")
+		}
+	})
+
+	t.Run("WAIT in script should block until enough replicas acknowledge", func(t *testing.T) {
+		// Disconnect the slave
+		slaveSrv.Close()
+
+		// Create a Lua script that uses WAIT
+		script := `
+			redis.call('SET', 'k2', 'v2')
+			return redis.call('WAIT', 1)
+		`
+
+		// Start a goroutine to execute the script
+		done := make(chan bool, 1)
+		go func() {
+			result := masterRdb.Eval(ctx, script, []string{})
+			require.NoError(t, result.Err())
+			done <- true
+		}()
+
+		select {
+		case <-done:
+			t.Fatal("WAIT in script did not block")
+		default:
+			// Success - script is blocked
+		}
+
+		// Restart slave and reconnect
+		slaveSrv.Start()
+		slaveRdb = slaveSrv.NewClient()
+		util.SlaveOf(t, slaveRdb, masterSrv)
+		util.WaitForSync(t, slaveRdb)
+
+		// Now WAIT in script should complete
+		select {
+		case <-done:
+			// Success - script completed after replica connected
+		case <-time.After(5 * time.Second):
+			t.Fatal("WAIT in script did not complete after replica connected")
+		}
+	})
 }
