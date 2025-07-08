@@ -347,11 +347,6 @@ class CommandDBName : public Commander {
 class CommandWait : public Commander {
  public:
   Status Parse(const std::vector<std::string> &args) override {
-    // WAIT numreplicas
-    if (args.size() != 2) {
-      return {Status::RedisParseErr, errWrongNumOfArguments};
-    }
-
     auto num_replicas_result = ParseInt<int>(args[1], 10);
     if (!num_replicas_result) {
       return {Status::RedisParseErr, "numreplicas should be a positive integer"};
