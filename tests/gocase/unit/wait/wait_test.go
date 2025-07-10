@@ -97,8 +97,8 @@ func TestWaitCommand(t *testing.T) {
 		select {
 		case <-done:
 			t.Fatal("WAIT command did not block")
-		default:
-			// Success - command is blocked
+		case <-time.After(1 * time.Second):
+			// Success - command blocked
 		}
 
 		// Restart slave and reconnect
