@@ -347,15 +347,11 @@ class CommandDBName : public Commander {
 class CommandWait : public Commander {
  public:
   Status Parse(const std::vector<std::string> &args) override {
-    auto num_replicas_result = ParseInt<int>(args[1], 10);
+    auto num_replicas_result = ParseInt<size_t>(args[1], 10);
     if (!num_replicas_result) {
       return {Status::RedisParseErr, "numreplicas should be a positive integer"};
     }
-    num_replicas_ = *num_replicas_result;
-    if (num_replicas_ < 0) {
-      return {Status::RedisParseErr, "numreplicas should be a positive integer"};
-    }
-
+    
     return Commander::Parse(args);
   }
 
