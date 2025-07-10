@@ -351,7 +351,7 @@ class CommandWait : public Commander {
     if (!num_replicas_result) {
       return {Status::RedisParseErr, "numreplicas should be a positive integer"};
     }
-    
+
     return Commander::Parse(args);
   }
 
