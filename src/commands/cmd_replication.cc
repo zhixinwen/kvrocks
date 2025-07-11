@@ -347,8 +347,8 @@ class CommandDBName : public Commander {
 class CommandWait : public Commander {
  public:
   Status Parse(const std::vector<std::string> &args) override {
-    auto num_replicas_result = ParseInt<int>(args[1], 10);
-    if (!num_replicas_result || *num_replicas_result <= 0) {
+    auto num_replicas_result = ParseInt<int>(args[1], {1, UINT64_MAX}, 10);
+    if (!num_replicas_result) {
       return {Status::RedisParseErr, "numreplicas should be a positive integer"};
     }
 
@@ -370,7 +370,7 @@ class CommandWait : public Commander {
     int reached_replicas = srv->GetReplicasReachedSequence(current_seq);
 
     // If we already have enough replicas, return immediately
-    if (reached_replicas >= num_replicas_) {
+    if (reached_replicas >= static_cast<int>(num_replicas_)) {
       *output = redis::Integer(reached_replicas);
       return Status::OK();
     }
@@ -384,7 +384,7 @@ class CommandWait : public Commander {
   }
 
  private:
-  int num_replicas_ = 0;
+  uint64_t num_replicas_ = 0;
 };
 
 REDIS_REGISTER_COMMANDS(Replication, MakeCmdAttr<CommandReplConf>("replconf", -3, "read-only no-script", NO_KEY),

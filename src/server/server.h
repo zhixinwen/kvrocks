@@ -231,7 +231,7 @@ class Server {
   void OnEntryAddedToStream(const std::string &ns, const std::string &key, const redis::StreamEntryID &entry_id);
 
   // WAIT command infrastructure
-  void BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas);
+  void BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, uint64_t num_replicas);
   void WakeupWaitConnections(rocksdb::SequenceNumber seq);
   void CleanupWaitConnection(redis::Connection *conn);
 
@@ -417,9 +417,9 @@ class Server {
   struct WaitContext {
     redis::Connection *conn;
     rocksdb::SequenceNumber target_seq;
-    int num_replicas;
+    uint64_t num_replicas;
 
-    WaitContext(redis::Connection *c, rocksdb::SequenceNumber seq, int replicas)
+    WaitContext(redis::Connection *c, rocksdb::SequenceNumber seq, uint64_t replicas)
         : conn(c), target_seq(seq), num_replicas(replicas) {}
   };
   std::list<WaitContext> wait_contexts_;

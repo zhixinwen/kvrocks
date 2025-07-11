@@ -701,7 +701,7 @@ void Server::OnEntryAddedToStream(const std::string &ns, const std::string &key,
   }
 }
 
-void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, int num_replicas) {
+void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, uint64_t num_replicas) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
 
   wait_contexts_.emplace_back(conn, target_seq, num_replicas);
@@ -718,7 +718,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
       int reached_replicas = GetReplicasReachedSequence(it->target_seq);
 
       // If enough replicas have reached the target sequence, wake up the connection
-      if (reached_replicas >= it->num_replicas) {
+      if (reached_replicas >= static_cast<int>(it->num_replicas)) {
         // Send the response with the number of replicas that have reached the target sequence
         it->conn->Reply(redis::Integer(reached_replicas));
 
