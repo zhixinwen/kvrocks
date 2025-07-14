@@ -35,6 +35,7 @@ func TestWaitCommand(t *testing.T) {
 
 	// Start slave server
 	slaveSrv := util.StartServer(t, map[string]string{})
+	defer slaveSrv.close()
 
 	ctx := context.Background()
 	masterRdb := masterSrv.NewClient()
