@@ -747,9 +747,9 @@ void Server::CleanupWaitConnection(redis::Connection *conn) {
   }
 }
 
-int Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
+size_t Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
   std::lock_guard<std::mutex> slave_guard(slave_threads_mu_);
-  int reached_replicas = 0;
+  size_t reached_replicas = 0;
   for (const auto &slave : slave_threads_) {
     if (!slave->IsStopped() && slave->GetCurrentReplSeq() >= target_seq) {
       reached_replicas++;
