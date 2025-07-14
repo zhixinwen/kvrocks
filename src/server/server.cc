@@ -715,10 +715,10 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
     // Check if target sequence is reached
     if (seq >= it->target_seq) {
       // Count how many replicas have reached the target sequence
-      int reached_replicas = GetReplicasReachedSequence(it->target_seq);
+      size_t reached_replicas = GetReplicasReachedSequence(it->target_seq);
 
       // If enough replicas have reached the target sequence, wake up the connection
-      if (reached_replicas >= static_cast<int>(it->num_replicas)) {
+      if (reached_replicas >= it->num_replicas) {
         // Send the response with the number of replicas that have reached the target sequence
         it->conn->Reply(redis::Integer(reached_replicas));
 
