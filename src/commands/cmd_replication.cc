@@ -367,10 +367,10 @@ class CommandWait : public Commander {
     auto current_seq = srv->storage->LatestSeqNumber();
 
     // Check if we already have enough replicas at the current sequence
-    int reached_replicas = srv->GetReplicasReachedSequence(current_seq);
+    size_t reached_replicas = srv->GetReplicasReachedSequence(current_seq);
 
     // If we already have enough replicas, return immediately
-    if (reached_replicas >= static_cast<int>(num_replicas_)) {
+    if (reached_replicas >= num_replicas_) {
       *output = redis::Integer(reached_replicas);
       return Status::OK();
     }
