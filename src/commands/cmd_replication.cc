@@ -348,7 +348,7 @@ class CommandWait : public Commander {
  public:
   Status Parse(const std::vector<std::string> &args) override {
     auto num_replicas_result = ParseInt<uint64_t>(args[1], 10);
-    if (!num_replicas_result) {
+    if (!num_replicas_result || *num_replicas_result == 0) {
       return {Status::RedisParseErr, "numreplicas should be a positive integer"};
     }
 
