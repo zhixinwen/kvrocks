@@ -236,7 +236,7 @@ class Server {
   void CleanupWaitConnection(redis::Connection *conn);
 
   // Helper methods for WAIT command
-  int GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq);
+  size_t GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq);
 
   size_t GetReplicaCount() {
     slave_threads_mu_.lock();
