@@ -711,10 +711,10 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
 
-  // Use upper_bound to find the first entry with target_seq > seq
-  auto end_it = wait_contexts_.upper_bound(seq);
+  // find the last entry with target_seq >= seq, which can wakeup
+  auto end_it = wait_contexts_.lower_bound(seq);
   
-  for (auto it = wait_contexts_.begin(); it != end_it;) {
+  for (auto it = wait_contexts_.begin(); it != end_it; ++it) {
     // Count how many replicas have reached the target sequence
     size_t reached_replicas = GetReplicasReachedSequence(it->second.target_seq);
 
@@ -756,6 +756,25 @@ size_t Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
     }
   }
   return reached_replicas;
+}
+
+rocksdb::SequenceNumber Server::LargestTargetSeqToWakeup(rocksdb::SequenceNumber seq) {
+  std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+
+  // Use upper_bound to find the first entry with target_seq > seq
+  // the largest seq that can wakeup is the last element before it
+  auto it = wait_contexts_.upper_bound(seq);
+  
+  // when wait_contexts_ is empty, it == wait_contexts_.begin().
+  // when all wait_contexts_.target_seq > seq, it == wait_contexts_.begin().
+  // both cases should return 0.
+  if (it == wait_contexts_.begin()) {
+    return 0;
+  }
+
+  // Return the largest target_seq that could potentially be unblocked
+  auto last_it = std::prev(it);
+  return last_it->second.target_seq;
 }
 
 void Server::updateCachedTime() { unix_time_secs.store(util::GetTimeStamp()); }
