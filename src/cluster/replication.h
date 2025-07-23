@@ -86,6 +86,7 @@ class FeedSlaveThread {
   // used to parse the ack response from the slave
   redis::Request req_;
   std::atomic<rocksdb::SequenceNumber> ack_seq_ = 0;
+  rocksdb::SequenceNumber last_replconf_getack_seq_ = 0;
 
   static const size_t kMaxDelayUpdates = 16;
   static const size_t kMaxDelayBytes = 16 * 1024;

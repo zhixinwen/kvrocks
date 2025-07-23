@@ -207,13 +207,6 @@ void FeedSlaveThread::loop() {
         return;
       }
 
-      // Check if this change would unblock any WAIT command
-      auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
-      if (largest_unblockable_seq > 0) {
-        // Send replconf getack to the slave to get acknowledgment
-        SendString(conn_->GetBufferEvent(), redis::ArrayOfBulkStrings({"replconf", "getack", "*"}));
-      }
-
       is_first_repl_batch = false;
       batches_bulk.clear();
       if (batches_bulk.capacity() > kMaxDelayBytes * 2) batches_bulk.shrink_to_fit();
@@ -221,6 +214,14 @@ void FeedSlaveThread::loop() {
     }
     curr_seq = batch.sequence + batch.writeBatchPtr->Count();
     next_repl_seq_.store(curr_seq);
+
+    // Check if this change would unblock any WAIT command
+    auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
+    if (largest_unblockable_seq > last_replconf_getack_seq_) {
+      last_replconf_getack_seq_ = largest_unblockable_seq;
+      // Send replconf getack to the slave to get acknowledgment
+      SendString(conn_->GetBufferEvent(), redis::BulkString("replconf getack"));
+    }
 
     while (!IsStopped() && !srv_->storage->WALHasNewData(curr_seq)) {
       usleep(yield_microseconds);
@@ -668,6 +669,15 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
             sendReplConfAck(bev);
           }
           return CBState::AGAIN;
+        }
+
+        if (bulk_string == "replconf getack") {
+          // master would send the replconf getack command to the master to get acknowledgment
+          // don't write replconf getack to db here.
+          if (data_written) {
+            sendReplConfAck(bev);
+          }
+          continue;
         }
 
         rocksdb::WriteBatch batch(std::move(bulk_string));
