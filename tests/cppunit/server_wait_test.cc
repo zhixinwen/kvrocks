@@ -20,56 +20,26 @@
 
 #include <gtest/gtest.h>
 
-#include <filesystem>
 #include <memory>
 
-#include "server/redis_connection.h"
 #include "server/server.h"
-#include "storage/storage.h"
+#include "test_base.h"
 
-class ServerWaitTest : public testing::Test {
+class ServerWaitTest : public TestBase {
  protected:
   void SetUp() override {
-    // Create a minimal config for testing
-    config_.db_dir = "testdb_wait";
-    config_.rocks_db.compression = rocksdb::CompressionType::kNoCompression;
-    config_.rocks_db.write_buffer_size = 1;
-    config_.rocks_db.block_size = 100;
-
-    // Create storage
-    storage_ = std::make_unique<engine::Storage>(&config_);
-    auto s = storage_->Open();
-    ASSERT_TRUE(s.IsOK()) << "Failed to open storage: " << s.Msg();
-
     // Create server
-    server_ = std::make_unique<Server>(storage_.get(), &config_);
+    server_ = std::make_unique<Server>(storage_.get(), storage_->GetConfig());
   }
-
-  void TearDown() override {
-    server_.reset();
-    storage_.reset();
-
-    // Clean up test directory
-    std::error_code ec;
-    std::filesystem::remove_all(config_.db_dir, ec);
-  }
+  ~ServerWaitTest() override = default;
 
   // Helper method to add wait contexts for testing using the public API
   void addWaitContext(rocksdb::SequenceNumber target_seq, uint64_t num_replicas) {
-    // Create a mock connection (we don't need a real one for this test)
-    auto conn = std::make_unique<redis::Connection>(nullptr, nullptr);
-
     // Use the public BlockOnWait method to add wait contexts
-    server_->BlockOnWait(conn.get(), target_seq, num_replicas);
-
-    // Keep the connection alive for the duration of the test
-    connections_.push_back(std::move(conn));
+    server_->BlockOnWait(nullptr, target_seq, num_replicas);
   }
 
-  Config config_;
-  std::unique_ptr<engine::Storage> storage_;
   std::unique_ptr<Server> server_;
-  std::vector<std::unique_ptr<redis::Connection>> connections_;
 };
 
 TEST_F(ServerWaitTest, EmptyMap) {
