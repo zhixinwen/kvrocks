@@ -206,14 +206,14 @@ void FeedSlaveThread::loop() {
         Stop();
         return;
       }
-      
+
       // Check if this change would unblock any WAIT command
       auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
       if (largest_unblockable_seq > 0) {
         // Send replconf getack to the slave to get acknowledgment
         SendString(conn_->GetBufferEvent(), redis::ArrayOfBulkStrings({"replconf", "getack", "*"}));
       }
-      
+
       is_first_repl_batch = false;
       batches_bulk.clear();
       if (batches_bulk.capacity() > kMaxDelayBytes * 2) batches_bulk.shrink_to_fit();

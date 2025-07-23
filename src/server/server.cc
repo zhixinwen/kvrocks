@@ -713,7 +713,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 
   // find the last entry with target_seq >= seq, which can wakeup
   auto end_it = wait_contexts_.lower_bound(seq);
-  
+
   for (auto it = wait_contexts_.begin(); it != end_it; ++it) {
     // Count how many replicas have reached the target sequence
     size_t reached_replicas = GetReplicasReachedSequence(it->second.target_seq);
@@ -760,11 +760,14 @@ size_t Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
 
 rocksdb::SequenceNumber Server::LargestTargetSeqToWakeup(rocksdb::SequenceNumber seq) {
   std::lock_guard<std::mutex> guard(wait_contexts_mu_);
+  if (wait_contexts_.empty()) {
+    return 0;
+  }
 
   // Use upper_bound to find the first entry with target_seq > seq
   // the largest seq that can wakeup is the last element before it
   auto it = wait_contexts_.upper_bound(seq);
-  
+
   // when wait_contexts_ is empty, it == wait_contexts_.begin().
   // when all wait_contexts_.target_seq > seq, it == wait_contexts_.begin().
   // both cases should return 0.
