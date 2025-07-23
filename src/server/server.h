@@ -422,7 +422,7 @@ class Server {
     WaitContext(redis::Connection *c, rocksdb::SequenceNumber seq, uint64_t replicas)
         : conn(c), target_seq(seq), num_replicas(replicas) {}
   };
-  std::list<WaitContext> wait_contexts_;
+  std::multimap<rocksdb::SequenceNumber, WaitContext> wait_contexts_;
   std::mutex wait_contexts_mu_;
 
   // threads
