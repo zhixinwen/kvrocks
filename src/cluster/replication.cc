@@ -620,14 +620,21 @@ ReplicationThread::CBState ReplicationThread::tryPSyncReadCB(bufferevent *bev) {
   }
 }
 
-void ReplicationThread::sendReplConfAck(bufferevent *bev) {
-  SendString(bev, redis::ArrayOfBulkStrings({"replconf", "ack", std::to_string(storage_->LatestSeqNumber())}));
+void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
+  int64_t now = util::GetTimeStamp();
+  
+  // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
+  if (force || (now - last_ack_time_secs_) >= 1) {
+    SendString(bev, redis::ArrayOfBulkStrings({"replconf", "ack", std::to_string(storage_->LatestSeqNumber())}));
+    last_ack_time_secs_ = now;
+  }
 }
 
 ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *bev) {
   repl_state_.store(kReplConnected, std::memory_order_relaxed);
   auto input = bufferevent_get_input(bev);
   bool data_written = false;
+  bool force_ack = false;
   while (true) {
     switch (incr_state_) {
       case Incr_batch_size: {
@@ -635,7 +642,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         UniqueEvbufReadln line(input, EVBUFFER_EOL_CRLF_STRICT);
         if (!line) {
           if (data_written) {
-            sendReplConfAck(bev);
+            sendReplConfAck(bev, force_ack);
           }
           return CBState::AGAIN;
         }
@@ -651,7 +658,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk data (batch data)
         if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
           if (data_written) {
-            sendReplConfAck(bev);
+            sendReplConfAck(bev, force_ack);
           }
           return CBState::AGAIN;
         }
@@ -666,7 +673,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           // master would send the ping heartbeat packet to check whether the slave was alive or not,
           // don't write ping to db here.
           if (data_written) {
-            sendReplConfAck(bev);
+            sendReplConfAck(bev, force_ack);
           }
           return CBState::AGAIN;
         }
@@ -674,9 +681,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         if (bulk_string == "replconf getack") {
           // master would send the replconf getack command to the master to get acknowledgment
           // don't write replconf getack to db here.
-          if (data_written) {
-            sendReplConfAck(bev);
-          }
+          force_ack = true;
           continue;
         }
 
