@@ -711,24 +711,11 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
   
-  for (const auto &entry : wait_contexts_) {
-    info("[server] wait_contexts_ entry: target_seq={}, num_replicas={}, conn_fd={}", 
-         entry.second.target_seq, entry.second.num_replicas, 
-         entry.second.conn ? entry.second.conn->GetFD() : -1);
-  }
   // find the last entry with target_seq > seq, which cannot wakeup
   auto end_it = wait_contexts_.upper_bound(seq);
-  if (end_it != wait_contexts_.end()) {
-    info("[server] WakeupWaitConnections: end_it target_seq = {}", end_it->second.target_seq);
-  } else {
-    info("[server] WakeupWaitConnections: end_it is wait_contexts_.end()");
-  }
-
   for (auto it = wait_contexts_.begin(); it != end_it;) {
-    info("[server] WakeupWaitConnections: it target_seq = {}", it->second.target_seq);
     // Count how many replicas have reached the target sequence
     size_t reached_replicas = GetReplicasReachedSequence(it->second.target_seq);
-    info("[server] WakeupWaitConnections: reached_replicas = {}", reached_replicas);
 
     // If enough replicas have reached the target sequence, wake up the connection
     if (reached_replicas >= it->second.num_replicas) {
@@ -745,8 +732,6 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
     }
     ++it;
   }
-
-  info("[server] WakeupWaitConnections: return");
 }
 
 void Server::CleanupWaitConnection(redis::Connection *conn) {

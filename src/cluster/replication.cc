@@ -150,7 +150,6 @@ void FeedSlaveThread::readCallback(bufferevent *bev, [[maybe_unused]] void *ctx)
   commands->clear();
 
   if (max_seq != 0) {
-    info("[replication] max_seq: {}", max_seq);
     ack_seq_.store(max_seq);
 
     // Wake up any WAIT connections that might be waiting for this sequence
@@ -219,8 +218,6 @@ void FeedSlaveThread::loop() {
     // Check if this change would unblock any WAIT command
     auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
     if (largest_unblockable_seq > last_replconf_getack_seq_) {
-      info("[replication] largest_unblockable_seq: {}, last_replconf_getack_seq_: {}", largest_unblockable_seq,
-           last_replconf_getack_seq_);
       // Send replconf getack to the slave to get acknowledgment
       auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
       if (!s.IsOK()) {
@@ -634,7 +631,6 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
 
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
   if (force || (now - last_ack_time_secs_) >= 1) {
-    info("[replication] send replconf ack, seq: {}", storage_->LatestSeqNumber());
     SendString(bev, redis::ArrayOfBulkStrings({"replconf", "ack", std::to_string(storage_->LatestSeqNumber())}));
     last_ack_time_secs_ = now;
   }
@@ -658,7 +654,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
         if (incr_bulk_len_ == 0) {
-          error("[replication] Invalid increment data size");
           return CBState::RESTART;
         }
         incr_state_ = Incr_batch_data;
@@ -676,7 +671,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         const char *bulk_data =
             reinterpret_cast<const char *>(evbuffer_pullup(input, static_cast<ssize_t>(incr_bulk_len_ + 2)));
         std::string bulk_string = std::string(bulk_data, incr_bulk_len_);
-        info("[replication] bulk_string: {}", bulk_string);
         evbuffer_drain(input, incr_bulk_len_ + 2);
         incr_state_ = Incr_batch_size;
 
@@ -690,7 +684,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         }
 
         if (bulk_string == "replconf getack") {
-          info("[replication] replconf getack command received, force ack");
           // master would send the replconf getack command to the master to get acknowledgment
           // don't write replconf getack to db here.
           force_ack = true;
