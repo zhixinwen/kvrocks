@@ -710,7 +710,7 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
-  
+
   // find the last entry with target_seq > seq, which cannot wakeup
   auto end_it = wait_contexts_.upper_bound(seq);
   for (auto it = wait_contexts_.begin(); it != end_it;) {

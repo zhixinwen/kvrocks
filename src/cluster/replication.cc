@@ -207,6 +207,20 @@ void FeedSlaveThread::loop() {
         return;
       }
 
+      // Check if this change would unblock any WAIT command
+      auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
+      if (largest_unblockable_seq > last_replconf_getack_seq_) {
+        // Send replconf getack to the slave to get acknowledgment
+        auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
+        if (!s.IsOK()) {
+          error("Write error while sending replconf getack to slave: {}. batches: 0x{}", s.Msg());
+          Stop();
+          return;
+        } else {
+          last_replconf_getack_seq_ = largest_unblockable_seq;
+        }
+      }
+
       is_first_repl_batch = false;
       batches_bulk.clear();
       if (batches_bulk.capacity() > kMaxDelayBytes * 2) batches_bulk.shrink_to_fit();
@@ -214,20 +228,6 @@ void FeedSlaveThread::loop() {
     }
     curr_seq = batch.sequence + batch.writeBatchPtr->Count();
     next_repl_seq_.store(curr_seq);
-
-    // Check if this change would unblock any WAIT command
-    auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
-    if (largest_unblockable_seq > last_replconf_getack_seq_) {
-      // Send replconf getack to the slave to get acknowledgment
-      auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
-      if (!s.IsOK()) {
-        error("Write error while sending replconf getack to slave: {}. batches: 0x{}", s.Msg());
-        Stop();
-        return;
-      } else {
-        last_replconf_getack_seq_ = largest_unblockable_seq;
-      }
-    }
 
     while (!IsStopped() && !srv_->storage->WALHasNewData(curr_seq)) {
       usleep(yield_microseconds);
