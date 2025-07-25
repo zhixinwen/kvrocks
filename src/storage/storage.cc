@@ -849,6 +849,10 @@ Status Storage::ReplicaApplyWriteBatch(rocksdb::WriteBatch *batch) {
   return applyWriteBatch(default_write_opts_, batch);
 }
 
+Status Storage::ReplicaApplyWriteBatch(rocksdb::WriteBatch *batch, const rocksdb::WriteOptions &options) {
+  return applyWriteBatch(options, batch);
+}
+
 Status Storage::applyWriteBatch(const rocksdb::WriteOptions &options, rocksdb::WriteBatch *batch) {
   if (db_size_limit_reached_) {
     return {Status::NotOK, "reach space limit"};
@@ -863,6 +867,14 @@ Status Storage::applyWriteBatch(const rocksdb::WriteOptions &options, rocksdb::W
 Status Storage::ApplyWriteBatch(const rocksdb::WriteOptions &options, std::string &&raw_batch) {
   auto batch = rocksdb::WriteBatch(std::move(raw_batch));
   return applyWriteBatch(options, &batch);
+}
+
+Status Storage::FlushWAL() {
+  auto s = db_->FlushWAL(true);
+  if (!s.ok()) {
+    return {Status::NotOK, s.ToString()};
+  }
+  return Status::OK();
 }
 
 void Storage::RecordStat(StatType type, uint64_t v) {
