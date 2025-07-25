@@ -845,10 +845,6 @@ rocksdb::Status Storage::ingestSST(rocksdb::ColumnFamilyHandle *cf_handle,
 
 void Storage::FlushBlockCache() { shared_block_cache_->EraseUnRefEntries(); }
 
-Status Storage::ReplicaApplyWriteBatch(rocksdb::WriteBatch *batch) {
-  return applyWriteBatch(default_write_opts_, batch);
-}
-
 Status Storage::ReplicaApplyWriteBatch(rocksdb::WriteBatch *batch, const rocksdb::WriteOptions &options) {
   return applyWriteBatch(options, batch);
 }
