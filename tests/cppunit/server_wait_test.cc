@@ -30,7 +30,11 @@ class ServerWaitTest : public TestBase {
   void SetUp() override {
     // Create server
     server_ = std::make_unique<Server>(storage_.get(), storage_->GetConfig());
+    // we don't need the server resource, so just stop it once it's started
+    server_->Stop();
+    server_->Join();
   }
+
   ~ServerWaitTest() override = default;
 
   // Helper method to add wait contexts for testing using the public API
