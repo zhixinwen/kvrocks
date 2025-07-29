@@ -865,8 +865,8 @@ Status Storage::ApplyWriteBatch(const rocksdb::WriteOptions &options, std::strin
   return applyWriteBatch(options, &batch);
 }
 
-Status Storage::FlushWAL() {
-  auto s = db_->FlushWAL(true);
+Status Storage::SyncWAL() {
+  auto s = db_->SyncWAL();
   if (!s.ok()) {
     return {Status::NotOK, s.ToString()};
   }

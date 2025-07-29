@@ -236,7 +236,7 @@ class Storage {
   Status ReplicaApplyWriteBatch(rocksdb::WriteBatch *batch, const rocksdb::WriteOptions &options);
   Status ApplyWriteBatch(const rocksdb::WriteOptions &options, std::string &&raw_batch);
   rocksdb::SequenceNumber LatestSeqNumber();
-  Status FlushWAL();
+  Status SyncWAL();
 
   [[nodiscard]] rocksdb::Status Get(engine::Context &ctx, const rocksdb::ReadOptions &options,
                                     const rocksdb::Slice &key, std::string *value);
