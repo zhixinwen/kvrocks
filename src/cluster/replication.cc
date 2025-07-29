@@ -394,8 +394,10 @@ ReplicationThread::ReplicationThread(std::string host, uint32_t port, Server *sr
       srv_(srv),
       storage_(srv->storage),
       repl_state_(kReplConnecting),
-      // replication_group_sync_ is only enabled when both replication-group-sync and rocksdb.write_options.sync are true
-      replication_group_sync_(srv->GetConfig()->replication_group_sync && srv->GetConfig()->rocks_db.write_options.sync),
+      // replication_group_sync_ is only enabled when both replication-group-sync and rocksdb.write_options.sync are
+      // true
+      replication_group_sync_(srv->GetConfig()->replication_group_sync &&
+                              srv->GetConfig()->rocks_db.write_options.sync),
       psync_steps_(
           this,
           CallbacksStateMachine::CallbackList{
@@ -656,7 +658,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
   if (replication_group_sync_) {
     write_opts.sync = false;
   }
-  
+
   while (true) {
     switch (incr_state_) {
       case Incr_batch_size: {
