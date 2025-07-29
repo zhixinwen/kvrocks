@@ -709,28 +709,43 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 }
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
-  std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
+  std::vector<std::tuple<Worker*, int, size_t>> connections_to_wakeup;
+  
+  {
+    std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
-  // find the last entry with target_seq > seq, which cannot wakeup
-  auto end_it = wait_contexts_.upper_bound(seq);
-  for (auto it = wait_contexts_.begin(); it != end_it;) {
-    // Count how many replicas have reached the target sequence
-    size_t reached_replicas = GetReplicasReachedSequence(it->second.target_seq);
+    // find the last entry with target_seq > seq, which cannot wakeup
+    auto end_it = wait_contexts_.upper_bound(seq);
+    for (auto it = wait_contexts_.begin(); it != end_it;) {
+      // Count how many replicas have reached the target sequence
+      size_t reached_replicas = GetReplicasReachedSequence(it->second.target_seq);
 
-    // If enough replicas have reached the target sequence, wake up the connection
-    if (reached_replicas >= it->second.num_replicas) {
-      // Send the response with the number of replicas that have reached the target sequence
-      it->second.conn->Reply(redis::Integer(reached_replicas));
-
-      auto s = it->second.conn->Owner()->EnableWriteEvent(it->second.conn->GetFD());
-      if (!s.IsOK()) {
-        error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
+      // If enough replicas have reached the target sequence, collect the connection for wakeup
+      if (reached_replicas >= it->second.num_replicas) {
+        // Store the worker, file descriptor, and reached replicas count before erasing the iterator
+        auto conn = it->second.conn;
+        connections_to_wakeup.emplace_back(conn->Owner(), conn->GetFD(), reached_replicas);
+        it = wait_contexts_.erase(it);
+        DecrBlockedClientNum();
+        continue;
       }
-      it = wait_contexts_.erase(it);
-      DecrBlockedClientNum();
+      ++it;
+    }
+  }
+
+  // Now wake up the connections without holding the lock
+  for (const auto& [worker, fd, reached_replicas] : connections_to_wakeup) {
+    // Send the response with the number of replicas that have reached the target sequence
+    auto reply_s = worker->Reply(fd, redis::Integer(reached_replicas));
+    if (!reply_s.IsOK()) {
+      // Connection may have been closed, which is fine
       continue;
     }
-    ++it;
+
+    auto s = worker->EnableWriteEvent(fd);
+    if (!s.IsOK()) {
+      error("[server] Failed to enable write event on WAIT connection {}: {}", fd, s.Msg());
+    }
   }
 }
 
