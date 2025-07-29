@@ -394,6 +394,7 @@ ReplicationThread::ReplicationThread(std::string host, uint32_t port, Server *sr
       srv_(srv),
       storage_(srv->storage),
       repl_state_(kReplConnecting),
+      replication_group_sync_(srv->GetConfig()->replication_group_sync),
       psync_steps_(
           this,
           CallbacksStateMachine::CallbackList{

@@ -203,6 +203,7 @@ Config::Config() {
       {"slave-read-only", false, new YesNoField(&slave_readonly, true)},
       {"replication-connect-timeout-ms", false, new IntField(&replication_connect_timeout_ms, 3100, 0, INT_MAX)},
       {"replication-recv-timeout-ms", false, new IntField(&replication_recv_timeout_ms, 3200, 0, INT_MAX)},
+      {"replication-group-sync", false, new YesNoField(&replication_group_sync, true)},
       {"use-rsid-psync", true, new YesNoField(&use_rsid_psync, false)},
       {"profiling-sample-ratio", false, new IntField(&profiling_sample_ratio, 0, 0, 100)},
       {"profiling-sample-record-max-len", false, new IntField(&profiling_sample_record_max_len, 256, 0, INT_MAX)},
