@@ -627,14 +627,14 @@ func TestReplicationGroupSyncConfig(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()
 
-	// Test with replication-group-sync enabled (default)
 	master := util.StartServer(t, map[string]string{})
 	defer master.Close()
 	masterClient := master.NewClient()
 	defer func() { require.NoError(t, masterClient.Close()) }()
 
 	slave := util.StartServer(t, map[string]string{
-		"replication-group-sync": "yes",
+		"replication-group-sync":     "yes",
+		"rocksdb.write_options.sync": "yes",
 	})
 	defer slave.Close()
 	slaveClient := slave.NewClient()
