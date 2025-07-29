@@ -238,6 +238,8 @@ class Storage {
   rocksdb::SequenceNumber LatestSeqNumber();
   Status SyncWAL();
 
+  Status FlushWAL(bool allow_write_stall = false);
+
   [[nodiscard]] rocksdb::Status Get(engine::Context &ctx, const rocksdb::ReadOptions &options,
                                     const rocksdb::Slice &key, std::string *value);
   [[nodiscard]] rocksdb::Status Get(engine::Context &ctx, const rocksdb::ReadOptions &options,

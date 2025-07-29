@@ -636,9 +636,15 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
   if (force || (now - last_ack_time_secs_) >= 1) {
     if (replication_group_sync_) {
-      auto s = storage_->SyncWAL();
+      Status s;
+      // Use FlushWAL when manual_wal_flush is enabled, otherwise use SyncWAL
+      if (srv_->GetConfig()->rocks_db.manual_wal_flush) {
+        s = storage_->FlushWAL(true);  // allow_write_stall = true
+      } else {
+        s = storage_->SyncWAL();
+      }
       if (!s.IsOK()) {
-        error("[replication] Failed to sync WAL before ack: {}", s.Msg());
+        error("[replication] Failed to sync/flush WAL before ack: {}", s.Msg());
         return;
       }
     }

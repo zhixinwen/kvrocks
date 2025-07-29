@@ -318,6 +318,9 @@ Config::Config() {
 
       /* rocksdb read options */
       {"rocksdb.read_options.async_io", false, new YesNoField(&rocks_db.read_options.async_io, true)},
+
+      /* rocksdb WAL options */
+      {"rocksdb.manual_wal_flush", true, new YesNoField(&rocks_db.manual_wal_flush, false)},
   };
   for (auto &wrapper : fields) {
     auto &field = wrapper.field;

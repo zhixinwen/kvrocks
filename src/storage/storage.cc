@@ -222,6 +222,9 @@ rocksdb::Options Storage::InitRocksDBOptions() {
   // avoid blocking io on iteration
   // see https://github.com/facebook/rocksdb/wiki/IO#avoid-blocking-io
   options.avoid_unnecessary_blocking_io = config_->rocks_db.avoid_unnecessary_blocking_io;
+
+  // Set manual WAL flush if configured
+  options.manual_wal_flush = config_->rocks_db.manual_wal_flush;
   return options;
 }
 
@@ -397,6 +400,8 @@ Status Storage::Open(DBOpenMode mode) {
 
   return Status::OK();
 }
+
+
 
 Status Storage::CreateBackup(uint64_t *sequence_number) {
   info("[storage] Start to create new backup");
@@ -867,6 +872,14 @@ Status Storage::ApplyWriteBatch(const rocksdb::WriteOptions &options, std::strin
 
 Status Storage::SyncWAL() {
   auto s = db_->SyncWAL();
+  if (!s.ok()) {
+    return {Status::NotOK, s.ToString()};
+  }
+  return Status::OK();
+}
+
+Status Storage::FlushWAL(bool allow_write_stall) {
+  auto s = db_->FlushWAL(allow_write_stall);
   if (!s.ok()) {
     return {Status::NotOK, s.ToString()};
   }
