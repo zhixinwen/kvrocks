@@ -394,7 +394,8 @@ ReplicationThread::ReplicationThread(std::string host, uint32_t port, Server *sr
       srv_(srv),
       storage_(srv->storage),
       repl_state_(kReplConnecting),
-      replication_group_sync_(srv->GetConfig()->replication_group_sync),
+      // replication_group_sync_ is only enabled when both replication-group-sync and rocksdb.write_options.sync are true
+      replication_group_sync_(srv->GetConfig()->replication_group_sync && srv->GetConfig()->rocks_db.write_options.sync),
       psync_steps_(
           this,
           CallbacksStateMachine::CallbackList{
@@ -633,9 +634,9 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
   if (force || (now - last_ack_time_secs_) >= 1) {
     if (replication_group_sync_) {
-      auto s = storage_->FlushWAL();
+      auto s = storage_->SyncWAL();
       if (!s.IsOK()) {
-        error("[replication] Failed to flush WAL before ack: {}", s.Msg());
+        error("[replication] Failed to sync WAL before ack: {}", s.Msg());
         return;
       }
     }
@@ -652,7 +653,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
   bool force_ack = false;
   // Use replication-group-sync logic if enabled and rocksdb.write_options.sync is true
   rocksdb::WriteOptions write_opts = storage_->DefaultWriteOptions();
-  if (replication_group_sync_ && write_opts.sync) {
+  if (replication_group_sync_) {
     write_opts.sync = false;
   }
   
