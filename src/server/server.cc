@@ -1128,6 +1128,7 @@ Server::InfoEntries Server::GetReplicationInfo() {
     entries.emplace_back("master_last_io_seconds_ago", now_secs - replication_thread_->LastIOTimeSecs());
     entries.emplace_back("slave_repl_offset", storage->LatestSeqNumber());
     entries.emplace_back("slave_priority", config_->slave_priority);
+    entries.emplace_back("replication_group_sync", config_->replication_group_sync ? "yes" : "no");
   }
 
   int idx = 0;
