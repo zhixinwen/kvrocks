@@ -210,10 +210,10 @@ void FeedSlaveThread::loop() {
       // Check if this change would unblock any WAIT command
       auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
       if (largest_unblockable_seq > last_replconf_getack_seq_) {
-        // Send replconf getack to the slave to get acknowledgment
-        auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
+        // Send _getack to the slave to get acknowledgment
+        auto s = util::SockSend(conn_->GetFD(), redis::BulkString("_getack"), conn_->GetBufferEvent());
         if (!s.IsOK()) {
-          error("Write error while sending replconf getack to slave: {}. batches: 0x{}", s.Msg());
+          error("Write error while sending _getack to slave: {}. batches: 0x{}", s.Msg());
           Stop();
           return;
         } else {
@@ -683,9 +683,9 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           return CBState::AGAIN;
         }
 
-        if (bulk_string == "replconf getack") {
-          // master would send the replconf getack command to the master to get acknowledgment
-          // don't write replconf getack to db here.
+        if (bulk_string == "_getack") {
+          // master would send the _getack command to the master to get acknowledgment
+          // don't write _getack to db here.
           force_ack = true;
           continue;
         }
