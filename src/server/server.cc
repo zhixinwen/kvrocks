@@ -712,9 +712,6 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 }
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
-  auto wakeup_ns = util::GetTimeStampNS();
-  info("[WAIT] Checking for wakeup at {} ns (seq: {})", wakeup_ns, seq);
-  
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
   // find the last entry with target_seq > seq, which cannot wakeup
@@ -734,10 +731,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
       auto s = it->second.conn->Owner()->EnableWriteEvent(it->second.conn->GetFD());
       if (!s.IsOK()) {
         error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
-      } else {
-        auto write_enabled_ns = util::GetTimeStampNS();
-        info("[WAIT] Write event enabled at {} ns (target_seq: {})", write_enabled_ns, it->second.target_seq);
-      }
+      } 
       it = wait_contexts_.erase(it);
       DecrBlockedClientNum();
       continue;
