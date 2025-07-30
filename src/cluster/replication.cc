@@ -208,14 +208,9 @@ void FeedSlaveThread::loop() {
       
       auto s = util::SockSend(conn_->GetFD(), batches_bulk, conn_->GetBufferEvent());
       if (!s.IsOK()) {
-        auto send_error_ns = util::GetTimeStampNS();
-        error("[REPLICATION] Send failed at {} ns (duration: {} ns): {}. batches: 0x{}", send_error_ns, send_error_ns - send_start_ns, s.Msg(), util::StringToHex(batches_bulk));
         Stop();
         return;
       }
-
-      auto send_end_ns = util::GetTimeStampNS();
-      info("[REPLICATION] Batch sent at {} ns (duration: {} ns)", send_end_ns, send_end_ns - send_start_ns);
 
       // Check if this change would unblock any WAIT command
       auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
@@ -226,13 +221,9 @@ void FeedSlaveThread::loop() {
         
         auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
         if (!s.IsOK()) {
-          auto getack_error_ns = util::GetTimeStampNS();
-          error("[REPLICATION] replconf getack failed at {} ns (duration: {} ns): {}", getack_error_ns, getack_error_ns - getack_start_ns, s.Msg());
           Stop();
           return;
         } else {
-          auto getack_end_ns = util::GetTimeStampNS();
-          info("[REPLICATION] replconf getack sent at {} ns (duration: {} ns)", getack_end_ns, getack_end_ns - getack_start_ns);
           last_replconf_getack_seq_ = largest_unblockable_seq;
         }
       }
