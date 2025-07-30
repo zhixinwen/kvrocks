@@ -731,11 +731,6 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
       
       // Send the response with the number of replicas that have reached the target sequence
       it->second.conn->Reply(redis::Integer(reached_replicas));
-
-      auto response_sent_ns = util::GetTimeStampNS();
-      info("[WAIT] Response sent to client at {} ns (target_seq: {}, reached_replicas: {})", 
-           response_sent_ns, it->second.target_seq, reached_replicas);
-
       auto s = it->second.conn->Owner()->EnableWriteEvent(it->second.conn->GetFD());
       if (!s.IsOK()) {
         error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
