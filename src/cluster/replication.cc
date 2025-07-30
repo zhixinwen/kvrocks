@@ -647,6 +647,7 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
 
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
   if (force || (now - last_ack_time_secs_) >= 1) {
+    info("[REPLICATION] Sending replconf ack at {} ns (seq: {})", now, storage_->LatestSeqNumber());
     SendString(bev, redis::ArrayOfBulkStrings({"replconf", "ack", std::to_string(storage_->LatestSeqNumber())}));
     last_ack_time_secs_ = now;
   }
