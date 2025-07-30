@@ -31,5 +31,6 @@ auto GetTimeStamp() {
 }
 inline uint64_t GetTimeStampMS() { return GetTimeStamp<std::chrono::milliseconds>(); }
 inline uint64_t GetTimeStampUS() { return GetTimeStamp<std::chrono::microseconds>(); }
+inline uint64_t GetTimeStampNS() { return GetTimeStamp<std::chrono::nanoseconds>(); }
 
 }  // namespace util

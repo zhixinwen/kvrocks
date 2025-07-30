@@ -702,6 +702,9 @@ void Server::OnEntryAddedToStream(const std::string &ns, const std::string &key,
 }
 
 void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, uint64_t num_replicas) {
+  auto block_ns = util::GetTimeStampNS();
+  info("[WAIT] Blocking connection at {} ns (target_seq: {}, num_replicas: {})", block_ns, target_seq, num_replicas);
+  
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
   wait_contexts_.emplace(target_seq, WaitContext(conn, target_seq, num_replicas));
@@ -709,6 +712,9 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 }
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
+  auto wakeup_ns = util::GetTimeStampNS();
+  info("[WAIT] Checking for wakeup at {} ns (seq: {})", wakeup_ns, seq);
+  
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
   // find the last entry with target_seq > seq, which cannot wakeup
@@ -719,12 +725,23 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 
     // If enough replicas have reached the target sequence, wake up the connection
     if (reached_replicas >= it->second.num_replicas) {
+      auto unblock_ns = util::GetTimeStampNS();
+      info("[WAIT] Unblocking connection at {} ns (target_seq: {}, reached_replicas: {}, required: {})", 
+           unblock_ns, it->second.target_seq, reached_replicas, it->second.num_replicas);
+      
       // Send the response with the number of replicas that have reached the target sequence
       it->second.conn->Reply(redis::Integer(reached_replicas));
+
+      auto response_sent_ns = util::GetTimeStampNS();
+      info("[WAIT] Response sent to client at {} ns (target_seq: {}, reached_replicas: {})", 
+           response_sent_ns, it->second.target_seq, reached_replicas);
 
       auto s = it->second.conn->Owner()->EnableWriteEvent(it->second.conn->GetFD());
       if (!s.IsOK()) {
         error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
+      } else {
+        auto write_enabled_ns = util::GetTimeStampNS();
+        info("[WAIT] Write event enabled at {} ns (target_seq: {})", write_enabled_ns, it->second.target_seq);
       }
       it = wait_contexts_.erase(it);
       DecrBlockedClientNum();

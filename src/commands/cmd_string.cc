@@ -310,12 +310,17 @@ class CommandSet : public Commander {
   }
 
   Status Execute(engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    auto start_ns = util::GetTimeStampNS();
+    info("[SET] Command started at {} ns", start_ns);
+    
     std::optional<std::string> ret;
     redis::String string_db(srv->storage, conn->GetNamespace());
 
     rocksdb::Status s = string_db.Set(ctx, args_[1], args_[2], {expire_, set_flag_, get_, keep_ttl_}, ret);
 
     if (!s.ok()) {
+      auto end_ns = util::GetTimeStampNS();
+      error("[SET] Command failed at {} ns (duration: {} ns): {}", end_ns, end_ns - start_ns, s.ToString());
       return {Status::RedisExecErr, s.ToString()};
     }
 
@@ -332,6 +337,9 @@ class CommandSet : public Commander {
         *output = conn->NilString();
       }
     }
+    
+    auto end_ns = util::GetTimeStampNS();
+    info("[SET] Command completed at {} ns (duration: {} ns)", end_ns, end_ns - start_ns);
     return Status::OK();
   }
 

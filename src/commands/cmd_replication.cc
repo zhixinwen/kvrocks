@@ -358,8 +358,13 @@ class CommandWait : public Commander {
   }
 
   Status Execute([[maybe_unused]] engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    auto start_ns = util::GetTimeStampNS();
+    info("[WAIT] Command started at {} ns", start_ns);
+    
     // Only master can execute WAIT command
     if (srv->IsSlave()) {
+      auto end_ns = util::GetTimeStampNS();
+      error("[WAIT] Command failed at {} ns (duration: {} ns): WAIT command can only be executed on master", end_ns, end_ns - start_ns);
       return {Status::RedisExecErr, "WAIT command can only be executed on master"};
     }
 
@@ -371,11 +376,15 @@ class CommandWait : public Commander {
 
     // If we already have enough replicas, return immediately
     if (reached_replicas >= num_replicas_) {
+      auto end_ns = util::GetTimeStampNS();
+      info("[WAIT] Command completed immediately at {} ns (duration: {} ns) - already have {} replicas", end_ns, end_ns - start_ns, reached_replicas);
       *output = redis::Integer(reached_replicas);
       return Status::OK();
     }
 
     // Block the connection and wait for replicas to catch up
+    auto block_start_ns = util::GetTimeStampNS();
+    info("[WAIT] Command blocking at {} ns (waiting for {} replicas, current: {})", block_start_ns, num_replicas_, reached_replicas);
     srv->BlockOnWait(conn, current_seq, num_replicas_);
 
     // The connection will be woken up by WakeupWaitConnections when enough replicas

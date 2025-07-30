@@ -150,6 +150,9 @@ void FeedSlaveThread::readCallback(bufferevent *bev, [[maybe_unused]] void *ctx)
   commands->clear();
 
   if (max_seq != 0) {
+    auto repl_change_ns = util::GetTimeStampNS();
+    info("[REPLICATION] Replication received ack at {} ns (max_seq: {})", repl_change_ns, max_seq);
+    
     ack_seq_.store(max_seq);
 
     // Wake up any WAIT connections that might be waiting for this sequence
@@ -200,23 +203,36 @@ void FeedSlaveThread::loop() {
     if (is_first_repl_batch || batches_bulk.size() >= kMaxDelayBytes || updates_in_batches >= kMaxDelayUpdates ||
         srv_->storage->LatestSeqNumber() - batch.sequence <= kMaxDelayUpdates) {
       // Send entire bulk which contain multiple batches
+      auto send_start_ns = util::GetTimeStampNS();
+      info("[REPLICATION] Sending batch at {} ns (batch_seq: {}, updates: {})", send_start_ns, batch.sequence, updates_in_batches);
+      
       auto s = util::SockSend(conn_->GetFD(), batches_bulk, conn_->GetBufferEvent());
       if (!s.IsOK()) {
-        error("Write error while sending batch to slave: {}. batches: 0x{}", s.Msg(), util::StringToHex(batches_bulk));
+        auto send_error_ns = util::GetTimeStampNS();
+        error("[REPLICATION] Send failed at {} ns (duration: {} ns): {}. batches: 0x{}", send_error_ns, send_error_ns - send_start_ns, s.Msg(), util::StringToHex(batches_bulk));
         Stop();
         return;
       }
+
+      auto send_end_ns = util::GetTimeStampNS();
+      info("[REPLICATION] Batch sent at {} ns (duration: {} ns)", send_end_ns, send_end_ns - send_start_ns);
 
       // Check if this change would unblock any WAIT command
       auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
       if (largest_unblockable_seq > last_replconf_getack_seq_) {
         // Send replconf getack to the slave to get acknowledgment
+        auto getack_start_ns = util::GetTimeStampNS();
+        info("[REPLICATION] Sending replconf getack at {} ns (largest_unblockable_seq: {})", getack_start_ns, largest_unblockable_seq);
+        
         auto s = util::SockSend(conn_->GetFD(), redis::BulkString("replconf getack"), conn_->GetBufferEvent());
         if (!s.IsOK()) {
-          error("Write error while sending replconf getack to slave: {}. batches: 0x{}", s.Msg());
+          auto getack_error_ns = util::GetTimeStampNS();
+          error("[REPLICATION] replconf getack failed at {} ns (duration: {} ns): {}", getack_error_ns, getack_error_ns - getack_start_ns, s.Msg());
           Stop();
           return;
         } else {
+          auto getack_end_ns = util::GetTimeStampNS();
+          info("[REPLICATION] replconf getack sent at {} ns (duration: {} ns)", getack_end_ns, getack_end_ns - getack_start_ns);
           last_replconf_getack_seq_ = largest_unblockable_seq;
         }
       }
