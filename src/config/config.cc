@@ -304,6 +304,8 @@ Config::Config() {
       {"rocksdb.max_compaction_bytes", false, new Int64Field(&rocks_db.max_compaction_bytes, 0, 0, INT64_MAX)},
       {"rocksdb.sst_file_delete_rate_bytes_per_sec", false,
        new Int64Field(&rocks_db.sst_file_delete_rate_bytes_per_sec, 0, 0, INT64_MAX)},
+      {"rocksdb.recycle_log_file_num", false,
+       new IntField(&rocks_db.recycle_log_file_num, 0, 0, INT_MAX)},
 
       /* rocksdb write options */
       {"rocksdb.write_options.sync", true, new YesNoField(&rocks_db.write_options.sync, false)},

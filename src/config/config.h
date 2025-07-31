@@ -239,6 +239,7 @@ struct Config {
     bool partition_filters;
     int64_t max_compaction_bytes;
     int64_t sst_file_delete_rate_bytes_per_sec = 0;
+    int recycle_log_file_num = 0;
 
     struct WriteOptions {
       bool sync;

@@ -189,6 +189,7 @@ rocksdb::Options Storage::InitRocksDBOptions() {
   options.max_manifest_file_size = 64 * MiB;
   options.max_log_file_size = 256 * MiB;
   options.keep_log_file_num = 12;
+  options.recycle_log_file_num = static_cast<size_t>(config_->rocks_db.recycle_log_file_num);
   options.WAL_ttl_seconds = static_cast<uint64_t>(config_->rocks_db.wal_ttl_seconds);
   options.WAL_size_limit_MB = static_cast<uint64_t>(config_->rocks_db.wal_size_limit_mb);
   options.max_total_wal_size = static_cast<uint64_t>(config_->rocks_db.max_total_wal_size * MiB);
