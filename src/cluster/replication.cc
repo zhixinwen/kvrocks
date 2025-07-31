@@ -174,6 +174,7 @@ void FeedSlaveThread::loop() {
     if (!iter_ || !iter_->Valid()) {
       if (iter_) info("WAL was rotated, would reopen again");
       if (!srv_->storage->WALHasNewData(curr_seq) || !srv_->storage->GetWALIter(curr_seq, &iter_).IsOK()) {
+        info("[REPLICATION] Waiting for new data at {} ns (curr_seq: {})", util::GetTimeStampNS(), curr_seq);
         iter_ = nullptr;
         usleep(yield_microseconds);
         checkLivenessIfNeed();
@@ -237,6 +238,7 @@ void FeedSlaveThread::loop() {
     next_repl_seq_.store(curr_seq);
 
     while (!IsStopped() && !srv_->storage->WALHasNewData(curr_seq)) {
+      info("[REPLICATION] Waiting for new data at {} ns (curr_seq: {})", util::GetTimeStampNS(), curr_seq);
       usleep(yield_microseconds);
       checkLivenessIfNeed();
     }

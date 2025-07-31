@@ -376,8 +376,6 @@ class CommandWait : public Commander {
     }
 
     // Block the connection and wait for replicas to catch up
-    auto block_start_ns = util::GetTimeStampNS();
-    info("[WAIT] Command blocking at {} ns (waiting for {} replicas, current: {})", block_start_ns, num_replicas_, reached_replicas);
     srv->BlockOnWait(conn, current_seq, num_replicas_);
 
     // The connection will be woken up by WakeupWaitConnections when enough replicas
