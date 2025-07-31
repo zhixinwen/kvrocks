@@ -707,6 +707,8 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           continue;
         }
 
+        info("[replication] Received bulk_string: '{}', bulk_string.len: {}, expected: {}", 
+             bulk_string, bulk_string.size(), incr_bulk_len_ + 2);
         rocksdb::WriteBatch batch(std::move(bulk_string));
 
         auto s = storage_->ReplicaApplyWriteBatch(&batch);
