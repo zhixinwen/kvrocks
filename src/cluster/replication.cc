@@ -651,6 +651,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
   auto input = bufferevent_get_input(bev);
   bool data_written = false;
   bool force_ack = false;
+  int updates_processed = 0;
   while (true) {
     switch (incr_state_) {
       case Incr_batch_size: {
@@ -660,6 +661,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
+          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
           return CBState::AGAIN;
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
@@ -675,6 +677,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
+          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
           return CBState::AGAIN;
         }
 
@@ -690,6 +693,8 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
+          info("[replication] Processed ping");
+          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
           return CBState::AGAIN;
         }
 
@@ -709,6 +714,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           return CBState::RESTART;
         }
         data_written = true;
+        updates_processed++;
 
         s = parseWriteBatch(batch);
         if (!s.IsOK()) {
