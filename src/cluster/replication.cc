@@ -675,6 +675,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
+          bufferevent_setwatermark(bev, EV_READ, incr_bulk_len_ + 2, 0);
           info("[replication] Processed {} updates in this batch loop iteration increment batch data", updates_processed);
           return CBState::AGAIN;
         }
@@ -691,8 +692,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
-          info("[replication] Processed ping");
-          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
+          info("[replication] Processed {} updates in this batch loop iteration ping", updates_processed);
           return CBState::AGAIN;
         }
 
