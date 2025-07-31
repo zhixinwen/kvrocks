@@ -238,7 +238,6 @@ void FeedSlaveThread::loop() {
     next_repl_seq_.store(curr_seq);
 
     while (!IsStopped() && !srv_->storage->WALHasNewData(curr_seq)) {
-      info("[REPLICATION] Waiting for new data at {} ns (curr_seq: {})", util::GetTimeStampNS(), curr_seq);
       usleep(yield_microseconds);
       checkLivenessIfNeed();
     }
@@ -479,7 +478,6 @@ void ReplicationThread::run() {
 
 ReplicationThread::CBState ReplicationThread::authWriteCB(bufferevent *bev) {
   SendString(bev, redis::ArrayOfBulkStrings({"AUTH", srv_->GetConfig()->masterauth}));
-  info("[replication] Auth request was sent, waiting for response");
   repl_state_.store(kReplSendAuth, std::memory_order_relaxed);
   return CBState::NEXT;
 }
@@ -661,7 +659,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
-          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
+          info("[replication] Processed {} updates in this batch loop iteration increment batch size", updates_processed);
           return CBState::AGAIN;
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
@@ -677,7 +675,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
-          info("[replication] Processed {} updates in this batch loop iteration", updates_processed);
+          info("[replication] Processed {} updates in this batch loop iteration increment batch data", updates_processed);
           return CBState::AGAIN;
         }
 
