@@ -654,6 +654,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
         if (incr_bulk_len_ == 0) {
+          error("[replication] Invalid increment data size");
           return CBState::RESTART;
         }
         incr_state_ = Incr_batch_data;
