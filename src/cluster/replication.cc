@@ -678,18 +678,22 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         break;
       }
       case Incr_batch_data:
+        size_t expected_length = incr_bulk_len_ + 2;
         // Read bulk data (batch data)
-        if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
+        if (expected_length > evbuffer_get_length(input)) {  // If data not enough
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
+          // Set watermark to expected_length, so that the next read will only be triggered when the data is enough
+          // Otherwise, the callback will be invoked prematurely causing throughput drop
+          bufferevent_setwatermark(bev, EV_READ, expected_length, 0);
           return CBState::AGAIN;
         }
 
         const char *bulk_data =
-            reinterpret_cast<const char *>(evbuffer_pullup(input, static_cast<ssize_t>(incr_bulk_len_ + 2)));
+            reinterpret_cast<const char *>(evbuffer_pullup(input, static_cast<ssize_t>(expected_length)));
         std::string bulk_string = std::string(bulk_data, incr_bulk_len_);
-        evbuffer_drain(input, incr_bulk_len_ + 2);
+        evbuffer_drain(input, expected_length);
         incr_state_ = Incr_batch_size;
 
         if (bulk_string == "ping") {
