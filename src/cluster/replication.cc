@@ -671,12 +671,16 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
       }
       case Incr_batch_data:
         // Read bulk data (batch data)
-        if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
+        auto length = evbuffer_get_length(input);
+        if (incr_bulk_len_ + 2 > length) {  // If data not enough
           if (data_written) {
             sendReplConfAck(bev, force_ack);
           }
           bufferevent_setwatermark(bev, EV_READ, incr_bulk_len_ + 2, 0);
           info("[replication] Processed {} updates in this batch loop iteration increment batch data", updates_processed);
+          if (updates_processed == 0) {
+            info("[replication] watermark is set to {}, get length: {}", incr_bulk_len_ + 2, length);
+          }
           return CBState::AGAIN;
         }
 
