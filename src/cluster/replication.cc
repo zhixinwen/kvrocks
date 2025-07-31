@@ -213,7 +213,7 @@ void FeedSlaveThread::loop() {
         // Send _getack to the slave to get acknowledgment
         auto s = util::SockSend(conn_->GetFD(), redis::BulkString("_getack"), conn_->GetBufferEvent());
         if (!s.IsOK()) {
-          error("Write error while sending _getack to slave: {}. batches: 0x{}", s.Msg());
+          error("Write error while sending _getack to slave: {}", s.Msg());
           Stop();
           return;
         } else {
