@@ -50,9 +50,6 @@
 #include "time_util.h"
 #include "unique_fd.h"
 
-// Forward declaration
-void SendString(bufferevent *bev, const std::string &data);
-
 #ifdef ENABLE_OPENSSL
 #include <event2/bufferevent_ssl.h>
 #include <openssl/err.h>
