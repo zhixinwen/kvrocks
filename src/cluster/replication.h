@@ -244,3 +244,24 @@ class WriteBatchHandler : public rocksdb::WriteBatch::Handler {
   std::pair<std::string, std::string> kv_;
   WriteBatchType type_ = kBatchTypeNone;
 };
+
+/*
+ * Handler used to merge multiple write batches into one
+ */
+class WriteBatchMerger : public rocksdb::WriteBatch::Handler {
+ public:
+  explicit WriteBatchMerger(engine::Storage* storage) : storage_(storage) {}
+  
+  rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
+  rocksdb::Status DeleteCF(uint32_t column_family_id, const rocksdb::Slice &key) override;
+  rocksdb::Status DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key, const rocksdb::Slice &end_key) override;
+  rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
+  void LogData(const rocksdb::Slice &blob) override;
+  
+  // Get the final WriteBatch
+  const rocksdb::WriteBatch* GetWriteBatch() const { return &write_batch_; }
+
+ private:
+  rocksdb::WriteBatch write_batch_;
+  engine::Storage* storage_;
+};

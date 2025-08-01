@@ -1153,3 +1153,26 @@ rocksdb::Status WriteBatchHandler::PutCF(uint32_t column_family_id, const rocksd
   }
   return rocksdb::Status::OK();
 }
+
+rocksdb::Status WriteBatchMerger::PutCF(uint32_t column_family_id, const rocksdb::Slice &key,
+                                                const rocksdb::Slice &value) {
+  return write_batch_.Put(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), key, value);
+}
+
+rocksdb::Status WriteBatchMerger::DeleteCF(uint32_t column_family_id, const rocksdb::Slice &key) {
+  return write_batch_.Delete(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), key);
+}
+
+rocksdb::Status WriteBatchMerger::DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key,
+                                                const rocksdb::Slice &end_key) {
+  return write_batch_.DeleteRange(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), begin_key, end_key);
+}
+
+rocksdb::Status WriteBatchMerger::MergeCF(uint32_t column_family_id, const rocksdb::Slice &key,
+                                          const rocksdb::Slice &value) {
+  return write_batch_.Merge(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), key, value);
+}
+
+void WriteBatchMerger::LogData(const rocksdb::Slice &blob) {
+  write_batch_.PutLogData(blob);
+}
