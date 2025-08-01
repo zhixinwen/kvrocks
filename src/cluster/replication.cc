@@ -154,6 +154,16 @@ void FeedSlaveThread::readCallback(bufferevent *bev, [[maybe_unused]] void *ctx)
   }
 }
 
+bool FeedSlaveThread::shouldSendGetAck(rocksdb::SequenceNumber seq) {
+  rocksdb::SequenceNumber largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(seq);
+  if (largest_unblockable_seq > last_getack_seq_) {
+    last_getack_seq_ = largest_unblockable_seq;
+    return true;
+  }
+
+  return false;
+}
+
 void FeedSlaveThread::loop() {
   // is_first_repl_batch was used to fix that replication may be stuck in a dead loop
   // when some seqs might be lost in the middle of the WAL log, so forced to replicate
@@ -196,26 +206,16 @@ void FeedSlaveThread::loop() {
     //    kMaxDelayUpdates than latest sequence.
     if (is_first_repl_batch || batches_bulk.size() >= kMaxDelayBytes || updates_in_batches >= kMaxDelayUpdates ||
         srv_->storage->LatestSeqNumber() - batch.sequence <= kMaxDelayUpdates) {
+      if (shouldSendGetAck(batch.sequence)) {
+        batches_bulk += redis::BulkString("_getack");
+      }
+
       // Send entire bulk which contain multiple batches
       auto s = util::SockSend(conn_->GetFD(), batches_bulk, conn_->GetBufferEvent());
       if (!s.IsOK()) {
         error("Write error while sending batch to slave: {}. batches: 0x{}", s.Msg(), util::StringToHex(batches_bulk));
         Stop();
         return;
-      }
-
-      // Check if this change would unblock any WAIT command
-      auto largest_unblockable_seq = srv_->LargestTargetSeqToWakeup(batch.sequence);
-      if (largest_unblockable_seq > last_getack_seq_) {
-        // Send _getack to the slave to get acknowledgment
-        auto s = util::SockSend(conn_->GetFD(), redis::BulkString("_getack"), conn_->GetBufferEvent());
-        if (!s.IsOK()) {
-          error("Write error while sending _getack to slave: {}", s.Msg());
-          Stop();
-          return;
-        } else {
-          last_getack_seq_ = largest_unblockable_seq;
-        }
       }
 
       is_first_repl_batch = false;

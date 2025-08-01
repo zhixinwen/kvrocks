@@ -96,6 +96,7 @@ class FeedSlaveThread {
   void checkLivenessIfNeed();
   void readCallback(bufferevent *bev, void *ctx);
   static void staticReadCallback(bufferevent *bev, void *ctx);
+  bool shouldSendGetAck(rocksdb::SequenceNumber seq);
 };
 
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
