@@ -222,9 +222,9 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   void sendReplConfAck(bufferevent *bev, bool force = false);
 
   Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
-  
+
   // Apply and parse the merged batch, returns CBState::RESTART on error, CBState::AGAIN on success
-  CBState applyMergedBatch(WriteBatchMerger& batch_merger, bufferevent* bev, bool force_ack);
+  CBState applyMergedBatch(WriteBatchMerger &batch_merger, bufferevent *bev, bool force_ack);
 };
 
 /*
@@ -256,19 +256,20 @@ class WriteBatchHandler : public rocksdb::WriteBatch::Handler {
  */
 class WriteBatchMerger : public rocksdb::WriteBatch::Handler {
  public:
-  explicit WriteBatchMerger(engine::Storage* storage) : storage_(storage) {}
-  
+  explicit WriteBatchMerger(engine::Storage *storage) : storage_(storage) {}
+
   rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
   rocksdb::Status DeleteCF(uint32_t column_family_id, const rocksdb::Slice &key) override;
-  rocksdb::Status DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key, const rocksdb::Slice &end_key) override;
+  rocksdb::Status DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key,
+                                const rocksdb::Slice &end_key) override;
   rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
   void LogData(const rocksdb::Slice &blob) override;
-  
-     // Get the final WriteBatch
-   rocksdb::WriteBatch* GetWriteBatch() { return &write_batch_; }
-   const rocksdb::WriteBatch* GetWriteBatch() const { return &write_batch_; }
+
+  // Get the final WriteBatch
+  rocksdb::WriteBatch *GetWriteBatch() { return &write_batch_; }
+  const rocksdb::WriteBatch *GetWriteBatch() const { return &write_batch_; }
 
  private:
   rocksdb::WriteBatch write_batch_;
-  engine::Storage* storage_;
+  engine::Storage *storage_;
 };

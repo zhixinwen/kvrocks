@@ -633,8 +633,9 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   }
 }
 
-ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger& batch_merger, bufferevent* bev, bool force_ack) {
-  rocksdb::WriteBatch* merged_batch = batch_merger.GetWriteBatch();
+ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger &batch_merger, bufferevent *bev,
+                                                               bool force_ack) {
+  rocksdb::WriteBatch *merged_batch = batch_merger.GetWriteBatch();
   if (merged_batch && !merged_batch->Data().empty()) {
     auto s = storage_->ReplicaApplyWriteBatch(merged_batch);
     if (!s.IsOK()) {
@@ -642,11 +643,11 @@ ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger&
             util::StringToHex(merged_batch->Data()));
       return CBState::RESTART;
     }
-    
+
     s = parseWriteBatch(*merged_batch);
     if (!s.IsOK()) {
-      error("[replication] CRITICAL - failed to parse merged write batch 0x{}: {}", util::StringToHex(merged_batch->Data()),
-            s.Msg());
+      error("[replication] CRITICAL - failed to parse merged write batch 0x{}: {}",
+            util::StringToHex(merged_batch->Data()), s.Msg());
       return CBState::RESTART;
     }
     sendReplConfAck(bev, force_ack);
@@ -659,7 +660,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
   auto input = bufferevent_get_input(bev);
   bool force_ack = false;
   WriteBatchMerger batch_merger(storage_);
-  
+
   while (true) {
     switch (incr_state_) {
       case Incr_batch_size: {
@@ -704,7 +705,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         }
 
         rocksdb::WriteBatch batch(std::move(bulk_string));
-        
+
         // Use WriteBatchMerger to collect this batch
         auto db_status = batch.Iterate(&batch_merger);
         if (!db_status.ok()) {
@@ -1162,7 +1163,7 @@ rocksdb::Status WriteBatchHandler::PutCF(uint32_t column_family_id, const rocksd
 }
 
 rocksdb::Status WriteBatchMerger::PutCF(uint32_t column_family_id, const rocksdb::Slice &key,
-                                                const rocksdb::Slice &value) {
+                                        const rocksdb::Slice &value) {
   return write_batch_.Put(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), key, value);
 }
 
@@ -1172,7 +1173,8 @@ rocksdb::Status WriteBatchMerger::DeleteCF(uint32_t column_family_id, const rock
 
 rocksdb::Status WriteBatchMerger::DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key,
                                                 const rocksdb::Slice &end_key) {
-  return write_batch_.DeleteRange(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), begin_key, end_key);
+  return write_batch_.DeleteRange(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), begin_key,
+                                  end_key);
 }
 
 rocksdb::Status WriteBatchMerger::MergeCF(uint32_t column_family_id, const rocksdb::Slice &key,
@@ -1180,6 +1182,4 @@ rocksdb::Status WriteBatchMerger::MergeCF(uint32_t column_family_id, const rocks
   return write_batch_.Merge(storage_->GetCFHandle(static_cast<ColumnFamilyID>(column_family_id)), key, value);
 }
 
-void WriteBatchMerger::LogData(const rocksdb::Slice &blob) {
-  write_batch_.PutLogData(blob);
-}
+void WriteBatchMerger::LogData(const rocksdb::Slice &blob) { write_batch_.PutLogData(blob); }
