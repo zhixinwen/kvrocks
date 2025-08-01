@@ -62,6 +62,9 @@ enum WriteBatchType {
 
 using FetchFileCallback = std::function<void(const std::string &, uint32_t)>;
 
+// Forward declaration
+class WriteBatchMerger;
+
 class FeedSlaveThread {
  public:
   explicit FeedSlaveThread(Server *srv, redis::Connection *conn, rocksdb::SequenceNumber next_repl_seq)
@@ -219,6 +222,9 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   void sendReplConfAck(bufferevent *bev, bool force = false);
 
   Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
+  
+  // Apply and parse the merged batch, returns CBState::RESTART on error, CBState::AGAIN on success
+  CBState applyMergedBatch(WriteBatchMerger& batch_merger, bool data_written, bufferevent* bev, bool force_ack);
 };
 
 /*
@@ -258,8 +264,9 @@ class WriteBatchMerger : public rocksdb::WriteBatch::Handler {
   rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
   void LogData(const rocksdb::Slice &blob) override;
   
-  // Get the final WriteBatch
-  const rocksdb::WriteBatch* GetWriteBatch() const { return &write_batch_; }
+     // Get the final WriteBatch
+   rocksdb::WriteBatch* GetWriteBatch() { return &write_batch_; }
+   const rocksdb::WriteBatch* GetWriteBatch() const { return &write_batch_; }
 
  private:
   rocksdb::WriteBatch write_batch_;
