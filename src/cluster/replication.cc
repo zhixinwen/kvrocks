@@ -633,23 +633,21 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   }
 }
 
-ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger& batch_merger, bool data_written, bufferevent* bev, bool force_ack) {
-  if (data_written) {
-    rocksdb::WriteBatch* merged_batch = batch_merger.GetWriteBatch();
-    if (merged_batch && !merged_batch->Data().empty()) {
-      auto s = storage_->ReplicaApplyWriteBatch(merged_batch);
-      if (!s.IsOK()) {
-        error("[replication] CRITICAL - Failed to write merged batch to local, {}. batch: 0x{}", s.Msg(),
-              util::StringToHex(merged_batch->Data()));
-        return CBState::RESTART;
-      }
-      
-      s = parseWriteBatch(*merged_batch);
-      if (!s.IsOK()) {
-        error("[replication] CRITICAL - failed to parse merged write batch 0x{}: {}", util::StringToHex(merged_batch->Data()),
-              s.Msg());
-        return CBState::RESTART;
-      }
+ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger& batch_merger, bufferevent* bev, bool force_ack) {
+  rocksdb::WriteBatch* merged_batch = batch_merger.GetWriteBatch();
+  if (merged_batch && !merged_batch->Data().empty()) {
+    auto s = storage_->ReplicaApplyWriteBatch(merged_batch);
+    if (!s.IsOK()) {
+      error("[replication] CRITICAL - Failed to write merged batch to local, {}. batch: 0x{}", s.Msg(),
+            util::StringToHex(merged_batch->Data()));
+      return CBState::RESTART;
+    }
+    
+    s = parseWriteBatch(*merged_batch);
+    if (!s.IsOK()) {
+      error("[replication] CRITICAL - failed to parse merged write batch 0x{}: {}", util::StringToHex(merged_batch->Data()),
+            s.Msg());
+      return CBState::RESTART;
     }
     sendReplConfAck(bev, force_ack);
   }
@@ -659,7 +657,6 @@ ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger&
 ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *bev) {
   repl_state_.store(kReplConnected, std::memory_order_relaxed);
   auto input = bufferevent_get_input(bev);
-  bool data_written = false;
   bool force_ack = false;
   WriteBatchMerger batch_merger(storage_);
   
@@ -670,7 +667,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         UniqueEvbufReadln line(input, EVBUFFER_EOL_CRLF_STRICT);
         if (!line) {
           // No more data available, apply the merged batch if we have one
-          return applyMergedBatch(batch_merger, data_written, bev, force_ack);
+          return applyMergedBatch(batch_merger, bev, force_ack);
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
         if (incr_bulk_len_ == 0) {
@@ -684,7 +681,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk data (batch data)
         if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
           // No more data available, apply the merged batch if we have one
-          return applyMergedBatch(batch_merger, data_written, bev, force_ack);
+          return applyMergedBatch(batch_merger, bev, force_ack);
         }
 
         const char *bulk_data =
@@ -696,7 +693,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         if (bulk_string == "ping") {
           // master would send the ping heartbeat packet to check whether the slave was alive or not,
           // don't write ping to db here.
-          return applyMergedBatch(batch_merger, data_written, bev, force_ack);
+          return applyMergedBatch(batch_merger, bev, force_ack);
         }
 
         if (bulk_string == "_getack") {
@@ -714,7 +711,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           error("[replication] CRITICAL - Failed to iterate over batch: {}", db_status.ToString());
           return CBState::RESTART;
         }
-        data_written = true;
 
         break;
     }

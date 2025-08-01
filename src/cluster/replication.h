@@ -224,7 +224,7 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
   
   // Apply and parse the merged batch, returns CBState::RESTART on error, CBState::AGAIN on success
-  CBState applyMergedBatch(WriteBatchMerger& batch_merger, bool data_written, bufferevent* bev, bool force_ack);
+  CBState applyMergedBatch(WriteBatchMerger& batch_merger, bufferevent* bev, bool force_ack);
 };
 
 /*
