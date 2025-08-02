@@ -651,6 +651,7 @@ ReplicationThread::CBState ReplicationThread::applyMergedBatch(WriteBatchMerger 
       return CBState::RESTART;
     }
     sendReplConfAck(bev, force_ack);
+    merged_batch->Clear();
   }
   return CBState::AGAIN;
 }
@@ -667,7 +668,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk length
         UniqueEvbufReadln line(input, EVBUFFER_EOL_CRLF_STRICT);
         if (!line) {
-          // No more data available, apply the merged batch if we have one
           return applyMergedBatch(batch_merger, bev, force_ack);
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
@@ -711,6 +711,11 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         if (!db_status.ok()) {
           error("[replication] CRITICAL - Failed to iterate over batch: {}", db_status.ToString());
           return CBState::RESTART;
+        }
+
+        // put the batch to db if the batch size is too large
+        if (batch_merger.GetWriteBatch()->GetDataSize() > 1024 * 1024 * 1) {
+          applyMergedBatch(batch_merger, bev, force_ack);
         }
 
         break;
