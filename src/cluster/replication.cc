@@ -391,6 +391,7 @@ ReplicationThread::ReplicationThread(std::string host, uint32_t port, Server *sr
       srv_(srv),
       storage_(srv->storage),
       repl_state_(kReplConnecting),
+      batch_merger_(srv->storage),
       psync_steps_(
           this,
           CallbacksStateMachine::CallbackList{
@@ -660,7 +661,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
   repl_state_.store(kReplConnected, std::memory_order_relaxed);
   auto input = bufferevent_get_input(bev);
   bool force_ack = false;
-  WriteBatchMerger batch_merger(storage_);
 
   while (true) {
     switch (incr_state_) {
@@ -668,7 +668,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk length
         UniqueEvbufReadln line(input, EVBUFFER_EOL_CRLF_STRICT);
         if (!line) {
-          return applyMergedBatch(batch_merger, bev, force_ack);
+          return applyMergedBatch(batch_merger_, bev, force_ack);
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
         if (incr_bulk_len_ == 0) {
@@ -682,7 +682,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk data (batch data)
         if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
           // No more data available, apply the merged batch if we have one
-          return applyMergedBatch(batch_merger, bev, force_ack);
+          return applyMergedBatch(batch_merger_, bev, force_ack);
         }
 
         const char *bulk_data =
@@ -694,7 +694,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         if (bulk_string == "ping") {
           // master would send the ping heartbeat packet to check whether the slave was alive or not,
           // don't write ping to db here.
-          return applyMergedBatch(batch_merger, bev, force_ack);
+          return applyMergedBatch(batch_merger_, bev, force_ack);
         }
 
         if (bulk_string == "_getack") {
@@ -707,15 +707,10 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         rocksdb::WriteBatch batch(std::move(bulk_string));
 
         // Use WriteBatchMerger to collect this batch
-        auto db_status = batch.Iterate(&batch_merger);
+        auto db_status = batch.Iterate(&batch_merger_);
         if (!db_status.ok()) {
           error("[replication] CRITICAL - Failed to iterate over batch: {}", db_status.ToString());
           return CBState::RESTART;
-        }
-
-        // put the batch to db if the batch size is too large
-        if (batch_merger.GetWriteBatch()->GetDataSize() > 1024 * 1024 * 1) {
-          applyMergedBatch(batch_merger, bev, force_ack);
         }
 
         break;

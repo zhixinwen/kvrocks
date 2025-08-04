@@ -62,9 +62,28 @@ enum WriteBatchType {
 
 using FetchFileCallback = std::function<void(const std::string &, uint32_t)>;
 
-// Forward declaration
-class WriteBatchMerger;
-
+/*
+ * Handler used to merge multiple write batches into one
+ */
+ class WriteBatchMerger : public rocksdb::WriteBatch::Handler {
+  public:
+   explicit WriteBatchMerger(engine::Storage *storage) : storage_(storage) {}
+ 
+   rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
+   rocksdb::Status DeleteCF(uint32_t column_family_id, const rocksdb::Slice &key) override;
+   rocksdb::Status DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key,
+                                 const rocksdb::Slice &end_key) override;
+   rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
+   void LogData(const rocksdb::Slice &blob) override;
+ 
+   // Get the final WriteBatch
+   rocksdb::WriteBatch *GetWriteBatch() { return &write_batch_; }
+   const rocksdb::WriteBatch *GetWriteBatch() const { return &write_batch_; }
+ 
+  private:
+   rocksdb::WriteBatch write_batch_;
+   engine::Storage *storage_;
+ };
 class FeedSlaveThread {
  public:
   explicit FeedSlaveThread(Server *srv, redis::Connection *conn, rocksdb::SequenceNumber next_repl_seq)
@@ -170,6 +189,7 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   int64_t last_ack_time_secs_ = 0;
   bool next_try_old_psync_ = false;
   bool next_try_without_announce_ip_address_ = false;
+  WriteBatchMerger batch_merger_;
 
   std::function<bool()> pre_fullsync_cb_;
   std::function<void()> post_fullsync_cb_;
@@ -249,27 +269,4 @@ class WriteBatchHandler : public rocksdb::WriteBatch::Handler {
  private:
   std::pair<std::string, std::string> kv_;
   WriteBatchType type_ = kBatchTypeNone;
-};
-
-/*
- * Handler used to merge multiple write batches into one
- */
-class WriteBatchMerger : public rocksdb::WriteBatch::Handler {
- public:
-  explicit WriteBatchMerger(engine::Storage *storage) : storage_(storage) {}
-
-  rocksdb::Status PutCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
-  rocksdb::Status DeleteCF(uint32_t column_family_id, const rocksdb::Slice &key) override;
-  rocksdb::Status DeleteRangeCF(uint32_t column_family_id, const rocksdb::Slice &begin_key,
-                                const rocksdb::Slice &end_key) override;
-  rocksdb::Status MergeCF(uint32_t column_family_id, const rocksdb::Slice &key, const rocksdb::Slice &value) override;
-  void LogData(const rocksdb::Slice &blob) override;
-
-  // Get the final WriteBatch
-  rocksdb::WriteBatch *GetWriteBatch() { return &write_batch_; }
-  const rocksdb::WriteBatch *GetWriteBatch() const { return &write_batch_; }
-
- private:
-  rocksdb::WriteBatch write_batch_;
-  engine::Storage *storage_;
 };
