@@ -681,6 +681,8 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
       case Incr_batch_data:
         // Read bulk data (batch data)
         if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
+          // set watermark to avoid waking up prematurely
+          bufferevent_setwatermark(bev, EV_READ, incr_bulk_len_ + 2, 0);
           // No more data available, apply the merged batch if we have one
           return applyMergedBatch(batch_merger_, bev, force_ack);
         }
