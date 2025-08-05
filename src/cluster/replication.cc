@@ -97,12 +97,17 @@ Status FeedSlaveThread::Start() {
 
 void FeedSlaveThread::Stop() {
   stop_ = true;
+  // disable read event so it would process the ack command
+  bufferevent_disable(conn_->GetBufferEvent(), EV_READ);
   warn("Slave thread was terminated, would stop feeding the slave: {}", conn_->GetAddr());
 }
 
 void FeedSlaveThread::Join() {
   if (auto s = util::ThreadJoin(t_); !s) {
     warn("Slave thread operation failed: {}", s.Msg());
+  } else {
+    // after the loop is finished, the connection can be freed
+    conn_.reset();
   }
 }
 

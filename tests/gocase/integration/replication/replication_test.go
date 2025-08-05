@@ -22,6 +22,9 @@ package replication
 import (
 	"context"
 	"fmt"
+	"io"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"testing"
@@ -621,4 +624,127 @@ func TestSlaveLostMaster(t *testing.T) {
 	require.NoError(t, replicaClient.Do(ctx, "clusterx", "SETNODES", unexistNodesInfo, "2").Err())
 	duration := time.Since(start)
 	require.Less(t, duration, time.Second*6)
+}
+
+func TestWALDiscreteError(t *testing.T) {
+	t.Parallel()
+	ctx := context.Background()
+
+	// Start master with small WAL settings to make corruption easier
+	master := util.StartServer(t, map[string]string{
+		"rocksdb.write_options.sync": "yes", // sync write to disk to ensure wal is persited for each write
+	})
+	defer master.Close()
+	masterClient := master.NewClient()
+	defer func() { require.NoError(t, masterClient.Close()) }()
+
+	slave := util.StartServer(t, map[string]string{})
+	defer slave.Close()
+	slaveClient := slave.NewClient()
+	defer func() { require.NoError(t, slaveClient.Close()) }()
+
+	// master should not crash if the wal file is corrupted
+	t.Run("Test WAL discrete sequence number", func(t *testing.T) {
+		sequenceHoleIndex := 100
+
+		require.NoError(t, masterClient.Set(ctx, "key", "value", 0).Err())
+
+		wait := make(chan struct{})
+
+		// call WAIT so slave would ack in the middle of replication instead of waiting for the end of replication
+		go func() {
+			masterClient.Conn().Do(ctx, "WAIT", "1")
+			close(wait)
+		}()
+		<-wait
+
+		// Write initial data to create WAL entries
+		for i := 0; i < sequenceHoleIndex; i++ {
+			require.NoError(t, masterClient.Set(ctx, fmt.Sprintf("key%d", i), fmt.Sprintf("%d", i), 0).Err())
+		}
+		dir := filepath.Join(masterClient.ConfigGet(ctx, "dir").Val()["dir"], "db")
+
+		walFile, err := getWALLogFile(dir)
+		require.NoError(t, err)
+		require.NotEmpty(t, walFile)
+
+		// Get current WAL file size
+		info, err := os.Stat(walFile)
+		require.NoError(t, err)
+		initialSize := info.Size()
+
+		// Write one more data
+		require.NoError(t, masterClient.Set(ctx, "key_middle", "value_middle", 0).Err())
+
+		// Get WAL file size again
+		info, err = os.Stat(walFile)
+		require.NoError(t, err)
+		sizeAfterMiddle := info.Size()
+
+		// Write more data after the middle
+		for i := sequenceHoleIndex; i < 101; i++ {
+			require.NoError(t, masterClient.Set(ctx, fmt.Sprintf("key%d", i), fmt.Sprintf("%d", i), 0).Err())
+		}
+		info, err = os.Stat(walFile)
+		require.NoError(t, err)
+		finalSize := info.Size()
+
+		// Open WAL file for read-write
+		f, err := os.OpenFile(walFile, os.O_RDWR, 0)
+		require.NoError(t, err)
+		defer f.Close()
+
+		// Read the data that comes after "key_middle" (from sizeAfter to currentSize)
+		_, err = f.Seek(sizeAfterMiddle, io.SeekStart)
+		require.NoError(t, err)
+		dataAfterMiddle := make([]byte, finalSize-sizeAfterMiddle)
+		_, err = f.Read(dataAfterMiddle)
+		require.NoError(t, err)
+
+		// Truncate to remove "key_middle" entry
+		_, err = f.Seek(initialSize, io.SeekStart)
+		require.NoError(t, err)
+		err = f.Truncate(initialSize)
+		require.NoError(t, err)
+
+		// Seek to end and append the data that was after "key_middle"
+		_, err = f.Seek(0, io.SeekEnd) // Seek to end
+		require.NoError(t, err)
+		_, err = f.Write(dataAfterMiddle)
+		require.NoError(t, err)
+		// Sync to disk
+		require.NoError(t, f.Sync())
+
+		util.SlaveOf(t, slaveClient, master)
+		util.WaitForSync(t, slaveClient)
+
+		// check master is still alive
+		require.NoError(t, masterClient.Do(ctx, "PING").Err())
+		// check slave is still alive
+		require.NoError(t, slaveClient.Do(ctx, "PING").Err())
+	})
+}
+
+func getWALLogFile(dbDir string) (string, error) {
+	files, err := os.ReadDir(dbDir)
+	if err != nil {
+		return "", err
+	}
+	var maxLogNum int64 = -1
+	var maxLogFile string
+	for _, file := range files {
+		name := file.Name()
+		if strings.HasSuffix(name, ".log") {
+			base := strings.TrimSuffix(name, ".log")
+			num, err := strconv.ParseInt(base, 10, 64)
+			if err == nil && num > maxLogNum {
+				maxLogNum = num
+				maxLogFile = filepath.Join(dbDir, name)
+			}
+		}
+	}
+	if maxLogFile == "" {
+		return "", fmt.Errorf("no .log file found in wal dir")
+	}
+	return maxLogFile, nil
 }
