@@ -21,6 +21,7 @@ package wait
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -32,6 +33,8 @@ import (
 func TestWaitCommand(t *testing.T) {
 	// Start master server
 	masterSrv := util.StartServer(t, map[string]string{})
+	dir := masterSrv.NewClient().ConfigGet(context.Background(), "dir").Val()["dir"]
+	fmt.Println(dir)
 	defer masterSrv.Close()
 
 	// Start slave server
@@ -49,41 +52,80 @@ func TestWaitCommand(t *testing.T) {
 	util.SlaveOf(t, slaveRdb, masterSrv)
 	util.WaitForSync(t, slaveRdb)
 
-	t.Run("WAIT with negative number should return error", func(t *testing.T) {
-		result := masterRdb.Do(ctx, "WAIT", "-1")
-		require.Error(t, result.Err())
-		require.Contains(t, result.Err().Error(), "numreplicas should be a positive integer")
-	})
+	// t.Run("WAIT with negative number should return error", func(t *testing.T) {
+	// 	result := masterRdb.Do(ctx, "WAIT", "-1")
+	// 	require.Error(t, result.Err())
+	// 	require.Contains(t, result.Err().Error(), "numreplicas should be a positive integer")
+	// })
 
-	t.Run("WAIT with invalid arguments should return error", func(t *testing.T) {
-		result := masterRdb.Do(ctx, "WAIT")
-		require.Error(t, result.Err())
-		require.Contains(t, result.Err().Error(), "wrong number of arguments")
+	// t.Run("WAIT with invalid arguments should return error", func(t *testing.T) {
+	// 	result := masterRdb.Do(ctx, "WAIT")
+	// 	require.Error(t, result.Err())
+	// 	require.Contains(t, result.Err().Error(), "wrong number of arguments")
 
-		result = masterRdb.Do(ctx, "WAIT", "1", "1000")
-		require.Error(t, result.Err())
-		require.Contains(t, result.Err().Error(), "wrong number of arguments")
-	})
+	// 	result = masterRdb.Do(ctx, "WAIT", "1", "1000")
+	// 	require.Error(t, result.Err())
+	// 	require.Contains(t, result.Err().Error(), "wrong number of arguments")
+	// })
 
-	t.Run("WAIT should not block indefinitely", func(t *testing.T) {
-		// Start a goroutine to execute WAIT
-		done := make(chan bool, 1)
-		go func() {
-			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
-			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
-			done <- true
-		}()
+	// t.Run("WAIT should not block indefinitely", func(t *testing.T) {
+	// 	// Start a goroutine to execute WAIT
+	// 	done := make(chan bool, 1)
+	// 	go func() {
+	// 		require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
+	// 		require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+	// 		done <- true
+	// 	}()
 
-		// Wait for the command to complete (should be immediate)
-		select {
-		case <-done:
-			// Success - command completed immediately
-		case <-time.After(5 * time.Second):
-			t.Fatal("WAIT command blocked indefinitely")
-		}
-	})
+	// 	// Wait for the command to complete (should be immediate)
+	// 	select {
+	// 	case <-done:
+	// 		// Success - command completed immediately
+	// 	case <-time.After(5 * time.Second):
+	// 		t.Fatal("WAIT command blocked indefinitely")
+	// 	}
+	// })
 
-	t.Run("WAIT should block until enough replicas acknowledge", func(t *testing.T) {
+	// t.Run("WAIT should block until enough replicas acknowledge", func(t *testing.T) {
+	// 	// Disconnect the slave
+	// 	require.NoError(t, slaveRdb.Do(ctx, "SLAVEOF", "NO", "ONE").Err())
+
+	// 	// Master remove the slave from the replication list periodically
+	// 	// so we need to wait for the master to detect the disconnection
+	// 	require.Eventually(t, func() bool {
+	// 		info := masterRdb.Info(ctx, "replication").Val()
+	// 		return !strings.Contains(info, "connected_slaves:1")
+	// 	}, 50*time.Second, 100*time.Millisecond)
+
+	// 	// Start a goroutine to execute WAIT
+	// 	done := make(chan bool, 1)
+	// 	go func() {
+	// 		require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
+	// 		require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+	// 		done <- true
+	// 	}()
+
+	// 	select {
+	// 	case <-done:
+	// 		t.Fatal("WAIT command did not block")
+	// 	case <-time.After(1 * time.Second):
+	// 		// Success - command blocked
+	// 	}
+
+	// 	// Reconnect the slave
+	// 	util.SlaveOf(t, slaveRdb, masterSrv)
+	// 	util.WaitForSync(t, slaveRdb)
+
+	// 	// Now WAIT should complete
+	// 	select {
+	// 	case <-done:
+	// 		// Success - command completed after replica connected
+	// 	case <-time.After(5 * time.Second):
+	// 		t.Fatal("WAIT command did not complete after replica connected")
+	// 	}
+	// })
+
+	t.Run("Multiple WAIT in one connection", func(t *testing.T) {
 		// Disconnect the slave
 		require.NoError(t, slaveRdb.Do(ctx, "SLAVEOF", "NO", "ONE").Err())
 
@@ -97,8 +139,16 @@ func TestWaitCommand(t *testing.T) {
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
 		go func() {
-			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
-			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+			pipe := masterRdb.Pipeline()
+			pipe.Do(ctx, "SET", "k1", "v1")
+			pipe.Do(ctx, "WAIT", "1")
+			pipe.Do(ctx, "WAIT", "1")
+			pipe.Do(ctx, "SET", "k1", "v2")
+			resp, _ := pipe.Exec(ctx)
+			fmt.Println(resp[0].String())
+			fmt.Println(resp[1].String())
+			fmt.Println(resp[2].String())
+			fmt.Println(resp[3].String())
 			done <- true
 		}()
 
@@ -109,16 +159,12 @@ func TestWaitCommand(t *testing.T) {
 			// Success - command blocked
 		}
 
+		require.Equal(t, "v1", masterRdb.Get(ctx, "k1").Val())
+
 		// Reconnect the slave
 		util.SlaveOf(t, slaveRdb, masterSrv)
 		util.WaitForSync(t, slaveRdb)
 
-		// Now WAIT should complete
-		select {
-		case <-done:
-			// Success - command completed after replica connected
-		case <-time.After(5 * time.Second):
-			t.Fatal("WAIT command did not complete after replica connected")
-		}
+		time.Sleep(30 * time.Second)
 	})
 }

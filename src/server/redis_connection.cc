@@ -81,6 +81,8 @@ void Connection::Close() {
 void Connection::Detach() { owner_->DetachConnection(this); }
 
 void Connection::OnRead([[maybe_unused]] struct bufferevent *bev) {
+  info("[connection] OnRead called");
+  
   is_running_ = true;
   MakeScopeExit([this] { is_running_ = false; });
 
@@ -92,6 +94,16 @@ void Connection::OnRead([[maybe_unused]] struct bufferevent *bev) {
     info("[connection] Failed to tokenize the request. Error: {}", s.Msg());
     return;
   }
+  // INSERT_YOUR_CODE
+  // Print each command received in this request
+  for (const auto& cmd_tokens : req_.GetCommands()->empty() ? std::deque<CommandTokens>() : *req_.GetCommands()) {
+    if (!cmd_tokens.empty()) {
+      std::string cmd_line = util::StringJoin(cmd_tokens, [](const auto& v) { return v; }, " ");
+      info("[connection] Received command: {}", cmd_line);
+    } else {
+      info("[connection] No commands received");
+    }
+  } 
 
   ExecuteCommands(req_.GetCommands());
   if (IsFlagEnabled(kCloseAsync)) {

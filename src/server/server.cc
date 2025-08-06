@@ -709,6 +709,7 @@ void Server::BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target
 }
 
 void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
+  info("[server] WakeupWaitConnections called");
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
   // find the last entry with target_seq > seq, which cannot wakeup
@@ -719,6 +720,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 
     // If enough replicas have reached the target sequence, wake up the connection
     if (reached_replicas >= it->second.num_replicas) {
+      info("[server] WakeupWaitConnections: reached_replicas={}, num_replicas={}", reached_replicas, it->second.num_replicas);
       // Send the response with the number of replicas that have reached the target sequence
       it->second.conn->Reply(redis::Integer(reached_replicas));
 
@@ -727,6 +729,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
         error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
       }
       it = wait_contexts_.erase(it);
+      info("[server] after erase wait connection, wait_contexts_.size()={}", wait_contexts_.size());
       DecrBlockedClientNum();
       continue;
     }
@@ -735,6 +738,7 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 }
 
 void Server::CleanupWaitConnection(redis::Connection *conn) {
+  info("[server] before cleanup wait connection, wait_contexts_.size()={}", wait_contexts_.size());
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
   auto it = std::find_if(wait_contexts_.begin(), wait_contexts_.end(),
@@ -743,6 +747,7 @@ void Server::CleanupWaitConnection(redis::Connection *conn) {
     wait_contexts_.erase(it);
     DecrBlockedClientNum();
   }
+  info("[server] after cleanup wait connection, wait_contexts_.size()={}", wait_contexts_.size());
 }
 
 size_t Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {

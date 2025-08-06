@@ -422,6 +422,7 @@ void Worker::DetachConnection(redis::Connection *conn) {
 }
 
 void Worker::FreeConnection(redis::Connection *conn) {
+  info("[worker] FreeConnection called");
   if (!conn) return;
 
   removeConnection(conn->GetFD());

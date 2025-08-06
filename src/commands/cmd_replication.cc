@@ -358,6 +358,7 @@ class CommandWait : public Commander {
   }
 
   Status Execute([[maybe_unused]] engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    info("WAIT command executed, conn fd: {}", conn->GetFD());
     // Only master can execute WAIT command
     if (srv->IsSlave()) {
       return {Status::RedisExecErr, "WAIT command can only be executed on master"};
