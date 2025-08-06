@@ -748,11 +748,11 @@ void Server::CleanupWaitConnection(redis::Connection *conn) {
       ++it;
     }
   }
-  
+
   if (erased_count > 0) {
     DecrBlockedClientNum();
     if (erased_count > 1) {
-      warn("[server] Multiple wait contexts ({}) found for connection {}, expect 1", erased_count, conn->GetFD());
+      warn("[server] {} wait contexts found for connection with fd {}, expect 1", erased_count, conn->GetFD());
     }
   }
 }
