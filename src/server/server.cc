@@ -737,11 +737,23 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
 void Server::CleanupWaitConnection(redis::Connection *conn) {
   std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
 
-  auto it = std::find_if(wait_contexts_.begin(), wait_contexts_.end(),
-                         [conn](const auto &pair) { return pair.second.conn == conn; });
-  if (it != wait_contexts_.end()) {
-    wait_contexts_.erase(it);
+  // Remove all wait contexts that match the given connection
+  auto it = wait_contexts_.begin();
+  int erased_count = 0;
+  while (it != wait_contexts_.end()) {
+    if (it->second.conn == conn) {
+      it = wait_contexts_.erase(it);
+      erased_count++;
+    } else {
+      ++it;
+    }
+  }
+  
+  if (erased_count > 0) {
     DecrBlockedClientNum();
+    if (erased_count > 1) {
+      warn("[server] Multiple wait contexts ({}) found for connection {}, expect 1", erased_count, conn->GetFD());
+    }
   }
 }
 
