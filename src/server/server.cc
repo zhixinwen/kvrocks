@@ -744,16 +744,17 @@ void Server::CleanupWaitConnection(redis::Connection *conn) {
     if (it->second.conn == conn) {
       it = wait_contexts_.erase(it);
       erased_count++;
+      // Technically only one client is unblocked, but we call IncrBlockedClientNum for each added wait context,
+      // so we need to call DecrBlockedClientNum for each erased wait context.
+      // Multiple wait contexts on the same connection should not happen, but we should be defensive.
+      DecrBlockedClientNum();
     } else {
       ++it;
     }
   }
 
   if (erased_count > 0) {
-    DecrBlockedClientNum();
-    if (erased_count > 1) {
-      warn("[server] {} wait contexts found for connection with fd {}, expect 1", erased_count, conn->GetFD());
-    }
+    warn("[server] {} wait contexts found for connection with fd {}, expect 1", erased_count, conn->GetFD());
   }
 }
 
