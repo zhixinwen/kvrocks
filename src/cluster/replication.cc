@@ -72,7 +72,7 @@ FeedSlaveThread::FeedSlaveThread(Server *srv, redis::Connection *conn, rocksdb::
 Status FeedSlaveThread::Start() {
   // Re-enable the bufferevent and set up callbacks after detachment
   auto bev = conn_->GetBufferEvent();
-  bufferevent_enable(bev, EV_READ);
+  bufferevent_enable(bev, EV_READ | EV_WRITE);
   bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
 
   auto s = util::CreateThread("feed-replica", [this] {
