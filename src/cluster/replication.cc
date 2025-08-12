@@ -75,7 +75,7 @@ Status FeedSlaveThread::Start() {
   auto bev = conn_->GetBufferEvent();
   bufferevent_base_set(base, bev);
   bufferevent_enable(bev, EV_READ | EV_WRITE);
-  bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
+  bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, &FeedSlaveThread::staticWriteCallback, nullptr, this);
   auto feed_replica_base_thread = util::CreateThread("feed-replica-base", [base] {
     event_base_dispatch(base);
   });
