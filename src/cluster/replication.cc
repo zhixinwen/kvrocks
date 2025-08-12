@@ -76,12 +76,15 @@ Status FeedSlaveThread::Start() {
   bufferevent_base_set(base, bev);
   bufferevent_enable(bev, EV_READ | EV_WRITE);
   bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
-  auto t = util::CreateThread("feed-replica-base", [base] {
+  auto feed_replica_base_thread = util::CreateThread("feed-replica-base", [base] {
     event_base_dispatch(base);
   });
-  if (!t) {
+  if (!feed_replica_base_thread) {
+    error("[replication] Failed to create feed-replica-base thread");
     conn_ = nullptr;  // prevent connection was freed when failed to start the thread
-    return t;
+    return feed_replica_base_thread;
+  } else {
+    feed_replica_base_thread_ = std::move(*feed_replica_base_thread);
   }
 
   auto s = util::CreateThread("feed-replica", [this] {

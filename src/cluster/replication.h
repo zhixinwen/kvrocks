@@ -81,6 +81,7 @@ class FeedSlaveThread {
   std::unique_ptr<redis::Connection> conn_ = nullptr;
   std::atomic<rocksdb::SequenceNumber> next_repl_seq_ = 0;
   std::thread t_;
+  std::thread feed_replica_base_thread_;
   std::unique_ptr<rocksdb::TransactionLogIterator> iter_ = nullptr;
   // used to parse the ack response from the slave
   redis::Request req_;
@@ -102,6 +103,7 @@ class FeedSlaveThread {
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
  public:
   explicit ReplicationThread(std::string host, uint32_t port, Server *srv);
+  ~ReplicationThread();
   Status Start(std::function<bool()> &&pre_fullsync_cb, std::function<void()> &&post_fullsync_cb);
   void Stop();
   bool IsStopped() const { return stop_flag_; }
