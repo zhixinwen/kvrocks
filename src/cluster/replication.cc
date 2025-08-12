@@ -650,7 +650,7 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   bool has_data_written = data_written_since_last_ack_.exchange(false);
   
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
-  if (force || has_data_written || (now - last_ack_time_secs_) >= 1) {
+  if ((force && has_data_written) || (now - last_ack_time_secs_) >= 1) {
     if (replication_group_sync_) {
       auto s = storage_->SyncWAL();
       if (!s.IsOK()) {
