@@ -103,7 +103,6 @@ class FeedSlaveThread {
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
  public:
   explicit ReplicationThread(std::string host, uint32_t port, Server *srv);
-  ~ReplicationThread();
   Status Start(std::function<bool()> &&pre_fullsync_cb, std::function<void()> &&post_fullsync_cb);
   void Stop();
   bool IsStopped() const { return stop_flag_; }
