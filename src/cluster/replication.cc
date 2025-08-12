@@ -75,7 +75,7 @@ Status FeedSlaveThread::Start() {
   auto bev = conn_->GetBufferEvent();
   bufferevent_base_set(base, bev);
   bufferevent_enable(bev, EV_READ | EV_WRITE);
-  bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
+  bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, &FeedSlaveThread::staticWriteCallback, nullptr, this);
   auto t = util::CreateThread("feed-replica-base", [base] {
     event_base_dispatch(base);
   });
@@ -92,7 +92,7 @@ Status FeedSlaveThread::Start() {
     sigaddset(&mask, SIGHUP);
     sigaddset(&mask, SIGPIPE);
     pthread_sigmask(SIG_BLOCK, &mask, &omask);
-    SendString(conn_->GetBufferEvent(), redis::RESP_OK);
+    queueDataForWriting(redis::RESP_OK);
 
     this->loop();
   });
@@ -120,12 +120,17 @@ void FeedSlaveThread::Join() {
 void FeedSlaveThread::checkLivenessIfNeed() {
   if (++interval_ % 1000) return;
   const auto ping_command = redis::BulkString("ping");
-  SendString(conn_->GetBufferEvent(), ping_command);
+  queueDataForWriting(ping_command);
 }
 
 void FeedSlaveThread::staticReadCallback(bufferevent *bev, void *ctx) {
   auto *thread = static_cast<FeedSlaveThread *>(ctx);
   thread->readCallback(bev, ctx);
+}
+
+void FeedSlaveThread::staticWriteCallback(bufferevent *bev, void *ctx) {
+  auto *thread = static_cast<FeedSlaveThread *>(ctx);
+  thread->writeCallback(bev, ctx);
 }
 
 // for now, the only command that the master receive from the slave on this connection should be ack.
@@ -166,6 +171,38 @@ void FeedSlaveThread::readCallback(bufferevent *bev, [[maybe_unused]] void *ctx)
 
     // Wake up any WAIT connections that might be waiting for this sequence
     srv_->WakeupWaitConnections(max_seq);
+  }
+}
+
+void FeedSlaveThread::writeCallback(bufferevent *bev, [[maybe_unused]] void *ctx) {
+  std::lock_guard<std::mutex> lock(write_queue_mutex_);
+  
+  auto output = bufferevent_get_output(bev);
+  if (evbuffer_get_length(output) > 0) {
+    // Still have data to write, don't process more
+    return;
+  }
+  
+  // Process queued data
+  while (!write_queue_.empty()) {
+    const auto &data = write_queue_.front();
+    evbuffer_add(output, data.c_str(), data.length());
+    write_queue_.pop();
+  }
+  
+  write_pending_.store(false);
+}
+
+void FeedSlaveThread::queueDataForWriting(const std::string &data) {
+  std::lock_guard<std::mutex> lock(write_queue_mutex_);
+  write_queue_.push(data);
+  
+  if (!write_pending_.exchange(true)) {
+    // Trigger write callback if not already pending
+    auto bev = conn_->GetBufferEvent();
+    if (bev) {
+      bufferevent_trigger(bev, EV_WRITE, BEV_TRIG_IGNORE_WATERMARKS);
+    }
   }
 }
 
@@ -226,7 +263,7 @@ void FeedSlaveThread::loop() {
       }
 
       // Send entire bulk which contain multiple batches
-      SendString(conn_->GetBufferEvent(), batches_bulk);
+      queueDataForWriting(batches_bulk);
 
       is_first_repl_batch = false;
       batches_bulk.clear();

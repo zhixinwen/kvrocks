@@ -26,6 +26,8 @@
 #include <chrono>
 #include <deque>
 #include <memory>
+#include <mutex>
+#include <queue>
 #include <string>
 #include <thread>
 #include <tuple>
@@ -92,11 +94,19 @@ class FeedSlaveThread {
   size_t max_delay_bytes_;
   size_t max_delay_updates_;
 
+  // Data queue for write callback
+  std::queue<std::string> write_queue_;
+  std::mutex write_queue_mutex_;
+  std::atomic<bool> write_pending_ = false;
+
   void loop();
   void checkLivenessIfNeed();
   void readCallback(bufferevent *bev, void *ctx);
   static void staticReadCallback(bufferevent *bev, void *ctx);
+  void writeCallback(bufferevent *bev, void *ctx);
+  static void staticWriteCallback(bufferevent *bev, void *ctx);
   bool shouldSendGetAck(rocksdb::SequenceNumber seq);
+  void queueDataForWriting(const std::string &data);
 };
 
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
