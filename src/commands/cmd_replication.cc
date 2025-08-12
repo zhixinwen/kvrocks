@@ -92,14 +92,9 @@ class CommandPSync : public Commander {
     // be taken over, so should never trigger any event in worker thread.
     conn->Detach();
     conn->EnableFlag(redis::Connection::kSlave);
-    auto s = util::SockSetBlocking(conn->GetFD(), 1);
-    if (!s.IsOK()) {
-      conn->EnableFlag(redis::Connection::kCloseAsync);
-      return s.Prefixed("failed to set blocking mode on socket");
-    }
-
     srv->stats.IncrPSyncOKCount();
-    s = srv->AddSlave(conn, next_repl_seq_);
+    
+    auto s = srv->AddSlave(conn, next_repl_seq_);
     if (!s.IsOK()) {
       std::string err = redis::Error(s);
       s = util::SockSend(conn->GetFD(), err, conn->GetBufferEvent());
