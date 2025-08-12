@@ -93,7 +93,7 @@ class CommandPSync : public Commander {
     conn->Detach();
     conn->EnableFlag(redis::Connection::kSlave);
     srv->stats.IncrPSyncOKCount();
-    
+
     auto s = srv->AddSlave(conn, next_repl_seq_);
     if (!s.IsOK()) {
       std::string err = redis::Error(s);

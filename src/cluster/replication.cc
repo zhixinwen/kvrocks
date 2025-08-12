@@ -56,6 +56,11 @@
 #include <openssl/ssl.h>
 #endif
 
+void SendString(bufferevent *bev, const std::string &data) {
+  auto output = bufferevent_get_output(bev);
+  evbuffer_add(output, data.c_str(), data.length());
+}
+
 FeedSlaveThread::FeedSlaveThread(Server *srv, redis::Connection *conn, rocksdb::SequenceNumber next_repl_seq)
     : srv_(srv),
       conn_(conn),
@@ -65,6 +70,11 @@ FeedSlaveThread::FeedSlaveThread(Server *srv, redis::Connection *conn, rocksdb::
       max_delay_updates_(srv->GetConfig()->max_replication_delay_updates) {}
 
 Status FeedSlaveThread::Start() {
+  // Re-enable the bufferevent and set up callbacks after detachment
+  auto bev = conn_->GetBufferEvent();
+  bufferevent_enable(bev, EV_READ);
+  bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
+
   auto s = util::CreateThread("feed-replica", [this] {
     sigset_t mask, omask;
     sigemptyset(&mask);
@@ -73,21 +83,13 @@ Status FeedSlaveThread::Start() {
     sigaddset(&mask, SIGHUP);
     sigaddset(&mask, SIGPIPE);
     pthread_sigmask(SIG_BLOCK, &mask, &omask);
-    auto s = util::SockSend(conn_->GetFD(), redis::RESP_OK, conn_->GetBufferEvent());
-    if (!s.IsOK()) {
-      error("failed to send OK response to the replica: {}", s.Msg());
-      return;
-    }
+    SendString(conn_->GetBufferEvent(), redis::RESP_OK);
+
     this->loop();
   });
 
   if (s) {
     t_ = std::move(*s);
-
-    // Re-enable the bufferevent and set up callbacks after detachment
-    auto bev = conn_->GetBufferEvent();
-    bufferevent_enable(bev, EV_READ);
-    bufferevent_setcb(bev, &FeedSlaveThread::staticReadCallback, nullptr, nullptr, this);
   } else {
     conn_ = nullptr;  // prevent connection was freed when failed to start the thread
   }
@@ -109,11 +111,7 @@ void FeedSlaveThread::Join() {
 void FeedSlaveThread::checkLivenessIfNeed() {
   if (++interval_ % 1000) return;
   const auto ping_command = redis::BulkString("ping");
-  auto s = util::SockSend(conn_->GetFD(), ping_command, conn_->GetBufferEvent());
-  if (!s.IsOK()) {
-    error("Ping slave [{}] err: {}, would stop the thread", conn_->GetAddr(), s.Msg());
-    Stop();
-  }
+  SendString(conn_->GetBufferEvent(), ping_command);
 }
 
 void FeedSlaveThread::staticReadCallback(bufferevent *bev, void *ctx) {
@@ -219,12 +217,7 @@ void FeedSlaveThread::loop() {
       }
 
       // Send entire bulk which contain multiple batches
-      auto s = util::SockSend(conn_->GetFD(), batches_bulk, conn_->GetBufferEvent());
-      if (!s.IsOK()) {
-        error("Write error while sending batch to slave: {}. batches: 0x{}", s.Msg(), util::StringToHex(batches_bulk));
-        Stop();
-        return;
-      }
+      SendString(conn_->GetBufferEvent(), batches_bulk);
 
       is_first_repl_batch = false;
       batches_bulk.clear();
@@ -240,11 +233,6 @@ void FeedSlaveThread::loop() {
     }
     iter_->Next();
   }
-}
-
-void SendString(bufferevent *bev, const std::string &data) {
-  auto output = bufferevent_get_output(bev);
-  evbuffer_add(output, data.c_str(), data.length());
 }
 
 void ReplicationThread::CallbacksStateMachine::ConnEventCB(bufferevent *bev, int16_t events) {
