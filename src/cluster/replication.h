@@ -38,6 +38,7 @@
 #include "server/redis_connection.h"
 #include "status.h"
 #include "storage/storage.h"
+#include "oneapi/tbb/concurrent_queue.h"
 
 class Server;
 
@@ -169,6 +170,21 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   bool next_try_old_psync_ = false;
   bool next_try_without_announce_ip_address_ = false;
 
+  // Buffer-based replication processing
+  struct BatchItem {
+    rocksdb::WriteBatch batch;
+    bool force_ack;
+    int64_t timestamp;
+    
+    BatchItem(rocksdb::WriteBatch b, bool force, int64_t ts) 
+        : batch(std::move(b)), force_ack(force), timestamp(ts) {}
+  };
+  
+  tbb::concurrent_queue<std::unique_ptr<BatchItem>> batch_queue_;
+  std::thread batch_processing_thread_;
+  std::atomic<bool> stop_batch_processing_ = false;
+  std::atomic<bool> data_written_since_last_ack_ = false;
+
   std::function<bool()> pre_fullsync_cb_;
   std::function<void()> post_fullsync_cb_;
 
@@ -220,6 +236,12 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   void sendReplConfAck(bufferevent *bev, bool force = false);
 
   Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
+  
+  // Batch processing thread methods
+  void startBatchProcessingThread();
+  void stopBatchProcessingThread();
+  void batchProcessingLoop();
+  void processBatchItem(std::unique_ptr<BatchItem> item);
 };
 
 /*

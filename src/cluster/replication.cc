@@ -27,6 +27,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <future>
 #include <memory>
@@ -438,6 +439,9 @@ Status ReplicationThread::Start(std::function<bool()> &&pre_fullsync_cb, std::fu
     assert(stop_flag_);
   }));
 
+  // Start batch processing thread
+  startBatchProcessingThread();
+
   return Status::OK();
 }
 
@@ -446,6 +450,10 @@ void ReplicationThread::Stop() {
 
   stop_flag_ = true;  // Stopping procedure is asynchronous,
                       // handled by timer
+  
+  // Stop batch processing thread
+  stopBatchProcessingThread();
+  
   if (auto s = util::ThreadJoin(t_); !s) {
     warn("Replication thread operation failed: {}", s.Msg());
   }
@@ -638,8 +646,11 @@ ReplicationThread::CBState ReplicationThread::tryPSyncReadCB(bufferevent *bev) {
 void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
   int64_t now = util::GetTimeStamp();
 
+  // Check if we have data written since last ack (from batch processing thread)
+  bool has_data_written = data_written_since_last_ack_.exchange(false);
+  
   // If force is true, always send ack. Otherwise, check if it has been 1s from last ack
-  if (force || (now - last_ack_time_secs_) >= 1) {
+  if (force || has_data_written || (now - last_ack_time_secs_) >= 1) {
     if (replication_group_sync_) {
       auto s = storage_->SyncWAL();
       if (!s.IsOK()) {
@@ -718,20 +729,10 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
 
         rocksdb::WriteBatch batch(std::move(bulk_string));
 
-        auto s = storage_->ReplicaApplyWriteBatch(&batch, write_opts);
-        if (!s.IsOK()) {
-          error("[replication] CRITICAL - Failed to write batch to local, {}. batch: 0x{}", s.Msg(),
-                util::StringToHex(batch.Data()));
-          return CBState::RESTART;
-        }
+        // Store batch in buffer for processing by separate thread
+        auto batch_item = std::make_unique<BatchItem>(std::move(batch), force_ack, util::GetTimeStamp());
+        batch_queue_.push(std::move(batch_item));
         data_written = true;
-
-        s = parseWriteBatch(batch);
-        if (!s.IsOK()) {
-          error("[replication] CRITICAL - failed to parse write batch 0x{}: {}", util::StringToHex(batch.Data()),
-                s.Msg());
-          return CBState::RESTART;
-        }
 
         break;
     }
@@ -1180,4 +1181,71 @@ rocksdb::Status WriteBatchHandler::PutCF(uint32_t column_family_id, const rocksd
     return rocksdb::Status::OK();
   }
   return rocksdb::Status::OK();
+}
+
+void ReplicationThread::startBatchProcessingThread() {
+  stop_batch_processing_ = false;
+  auto thread_result = util::CreateThread("batch-processor", [this] {
+    this->batchProcessingLoop();
+  });
+  if (thread_result) {
+    batch_processing_thread_ = std::move(*thread_result);
+  } else {
+    error("[replication] Failed to create batch processing thread: {}", thread_result.Msg());
+  }
+}
+
+void ReplicationThread::stopBatchProcessingThread() {
+  if (stop_batch_processing_) return;
+  
+  stop_batch_processing_ = true;
+  
+  if (batch_processing_thread_.joinable()) {
+    if (auto s = util::ThreadJoin(batch_processing_thread_); !s) {
+      warn("Batch processing thread operation failed: {}", s.Msg());
+    }
+  }
+}
+
+void ReplicationThread::batchProcessingLoop() {
+  while (!stop_batch_processing_) {
+    std::unique_ptr<BatchItem> item;
+    
+    if (batch_queue_.try_pop(item)) {
+      processBatchItem(std::move(item));
+    } else {
+      // No items in queue, sleep briefly to avoid busy waiting
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+}
+
+void ReplicationThread::processBatchItem(std::unique_ptr<BatchItem> item) {
+  // Use replication-group-sync logic if enabled and rocksdb.write_options.sync is true
+  rocksdb::WriteOptions write_opts = storage_->DefaultWriteOptions();
+  if (replication_group_sync_) {
+    write_opts.sync = false;
+  }
+
+  auto s = storage_->ReplicaApplyWriteBatch(&item->batch, write_opts);
+  if (!s.IsOK()) {
+    error("[replication] CRITICAL - Failed to write batch to local, {}. batch: 0x{}", s.Msg(),
+          util::StringToHex(item->batch.Data()));
+    return;
+  }
+
+  s = parseWriteBatch(item->batch);
+  if (!s.IsOK()) {
+    error("[replication] CRITICAL - failed to parse write batch 0x{}: {}", util::StringToHex(item->batch.Data()),
+          s.Msg());
+    return;
+  }
+
+  data_written_since_last_ack_ = true;
+  
+  // Send acknowledgment if needed
+  if (item->force_ack || (util::GetTimeStamp() - last_ack_time_secs_) >= 1) {
+    // Note: We need to send ack through the main replication thread
+    // This will be handled by the main thread checking data_written_since_last_ack_
+  }
 }
