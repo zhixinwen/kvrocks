@@ -356,7 +356,7 @@ class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
     num_replicas_ = *num_replicas_result;
 
     auto timeout_result = ParseInt<int64_t>(args[2], 10);
-    if (*timeout_result < 0) {
+    if (!timeout_result || *timeout_result < 0) {
       return {Status::RedisParseErr, "timeout should be a non-negative integer"};
     }
 
