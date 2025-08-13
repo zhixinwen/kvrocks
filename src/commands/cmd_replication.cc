@@ -399,12 +399,8 @@ class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
   }
 
   void TimerCB(int, int16_t) {
-    auto reached_replicas = srv_->GetReplicasReachedSequence(target_seq_);
-    conn_->Reply(redis::Integer(reached_replicas));
-
     timer_.reset();
-    // enable read event so the connection can process other commands
-    bufferevent_enable(conn_->GetBufferEvent(), EV_READ);
+    srv_->WakeupWaitConnection(conn_, target_seq_);
   }
 
  private:
