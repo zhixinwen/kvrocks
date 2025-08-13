@@ -38,8 +38,7 @@
 #include "server/redis_connection.h"
 #include "status.h"
 #include "storage/storage.h"
-#include "oneapi/tbb/concurrent_queue.h"
-
+#include <tbb/concurrent_queue.h>
 class Server;
 
 enum ReplState {
