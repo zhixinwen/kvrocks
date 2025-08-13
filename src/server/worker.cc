@@ -466,6 +466,18 @@ Status Worker::EnableWriteEvent(int fd) {
   return {Status::NotOK, "connection doesn't exist"};
 }
 
+Status Worker::EnableReadEvent(int fd) {
+  std::unique_lock<std::mutex> lock(conns_mu_);
+  auto iter = conns_.find(fd);
+  if (iter != conns_.end()) {
+    auto bev = iter->second->GetBufferEvent();
+    bufferevent_enable(bev, EV_READ);
+    return Status::OK();
+  }
+
+  return {Status::NotOK, "connection doesn't exist"};
+}
+
 Status Worker::Reply(int fd, const std::string &reply) {
   std::unique_lock<std::mutex> lock(conns_mu_);
   auto iter = conns_.find(fd);
