@@ -20,6 +20,7 @@
 
 #include "commander.h"
 #include "error_constants.h"
+#include "event_util.h"
 #include "io_util.h"
 #include "scope_exit.h"
 #include "server/redis_reply.h"
@@ -344,7 +345,7 @@ class CommandDBName : public Commander {
   }
 };
 
-class CommandWait : public Commander {
+class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
  public:
   Status Parse(const std::vector<std::string> &args) override {
     auto num_replicas_result = ParseInt<int64_t>(args[1], 10);
@@ -355,7 +356,7 @@ class CommandWait : public Commander {
     num_replicas_ = *num_replicas_result;
 
     auto timeout_result = ParseInt<int64_t>(args[2], 10);
-    if (!timeout_result || *timeout_result < 0) {
+    if (*timeout_result < 0) {
       return {Status::RedisParseErr, "timeout should be a non-negative integer"};
     }
 
@@ -385,14 +386,49 @@ class CommandWait : public Commander {
     // Block the connection and wait for replicas to catch up
     srv->BlockOnWait(conn, current_seq, num_replicas_);
 
+    // Disable read event so the connection will not process any other commands
+    bufferevent_disable(conn->GetBufferEvent(), EV_READ);
+
+    if (timeout_ > 0) {
+      initTimer(conn, srv, current_seq, timeout_);
+    }
+
     // The connection will be woken up by WakeupWaitConnections when enough replicas
     // have reached the target sequence
     return {Status::BlockingCmd};
   }
 
+  void TimerCB(int, int16_t) {
+    auto reached_replicas = srv_->GetReplicasReachedSequence(target_seq_);
+    conn_->Reply(redis::Integer(reached_replicas));
+
+    timer_.reset();
+    // enable read event so the connection can process other commands
+    bufferevent_enable(conn_->GetBufferEvent(), EV_READ);
+  }
+
  private:
   uint64_t num_replicas_ = 0;
-  uint64_t timeout_ = 0;  // microseconds
+  int64_t timeout_ = 0;  // microseconds
+  UniqueEvent timer_;
+  Connection *conn_ = nullptr;
+  Server *srv_ = nullptr;
+  rocksdb::SequenceNumber target_seq_ = 0;
+
+  void initTimer(Connection *conn, Server *srv, rocksdb::SequenceNumber target_seq, int64_t timeout) {
+    // init related instance variables
+    srv_ = srv;
+    conn_ = conn;
+    target_seq_ = target_seq;
+
+    // init timer
+    auto bev = conn->GetBufferEvent();
+    timer_.reset(NewTimer(bufferevent_get_base(bev)));
+    int64_t timeout_second = timeout / 1000 / 1000;
+    int64_t timeout_microsecond = timeout % (1000 * 1000);
+    timeval tm = {timeout_second, static_cast<int>(timeout_microsecond)};
+    evtimer_add(timer_.get(), &tm);
+  }
 };
 
 REDIS_REGISTER_COMMANDS(Replication, MakeCmdAttr<CommandReplConf>("replconf", -3, "read-only no-script", NO_KEY),
