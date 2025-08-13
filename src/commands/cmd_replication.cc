@@ -354,6 +354,13 @@ class CommandWait : public Commander {
 
     num_replicas_ = *num_replicas_result;
 
+    auto timeout_result = ParseInt<int64_t>(args[2], 10);
+    if (!timeout_result || *timeout_result < 0) {
+      return {Status::RedisParseErr, "timeout should be a non-negative integer"};
+    }
+
+    timeout_ = *timeout_result;
+
     return Commander::Parse(args);
   }
 
@@ -385,6 +392,7 @@ class CommandWait : public Commander {
 
  private:
   uint64_t num_replicas_ = 0;
+  uint64_t timeout_ = 0;  // microseconds
 };
 
 REDIS_REGISTER_COMMANDS(Replication, MakeCmdAttr<CommandReplConf>("replconf", -3, "read-only no-script", NO_KEY),
@@ -392,6 +400,6 @@ REDIS_REGISTER_COMMANDS(Replication, MakeCmdAttr<CommandReplConf>("replconf", -3
                         MakeCmdAttr<CommandFetchMeta>("_fetch_meta", 1, "read-only no-multi no-script", NO_KEY),
                         MakeCmdAttr<CommandFetchFile>("_fetch_file", 2, "read-only no-multi no-script", NO_KEY),
                         MakeCmdAttr<CommandDBName>("_db_name", 1, "read-only no-multi", NO_KEY),
-                        MakeCmdAttr<CommandWait>("wait", 2, "read-only no-multi no-script blocking", NO_KEY), )
+                        MakeCmdAttr<CommandWait>("wait", 3, "read-only no-multi no-script blocking", NO_KEY), )
 
 }  // namespace redis
