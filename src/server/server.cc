@@ -753,8 +753,6 @@ void Server::CleanupWaitConnection(redis::Connection *conn) {
 }
 
 void Server::cleanupWaitConnection(redis::Connection *conn) {
-  std::unique_lock<std::shared_mutex> guard(wait_contexts_mu_);
-
   // Remove all wait contexts that match the given connection
   auto it = wait_contexts_.begin();
   int erased_count = 0;

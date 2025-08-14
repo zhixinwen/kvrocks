@@ -50,7 +50,7 @@ func TestWaitCommand(t *testing.T) {
 	util.WaitForSync(t, slaveRdb)
 
 	t.Run("WAIT with negative number should return error", func(t *testing.T) {
-		result := masterRdb.Do(ctx, "WAIT", "-1")
+		result := masterRdb.Wait(ctx, -1, 0)
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "numreplicas should be a positive integer")
 	})
@@ -60,7 +60,7 @@ func TestWaitCommand(t *testing.T) {
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "wrong number of arguments")
 
-		result = masterRdb.Do(ctx, "WAIT", "1", "1000")
+		result = masterRdb.Do(ctx, "WAIT", "1")
 		require.Error(t, result.Err())
 		require.Contains(t, result.Err().Error(), "wrong number of arguments")
 	})
@@ -69,8 +69,8 @@ func TestWaitCommand(t *testing.T) {
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
 		go func() {
-			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
-			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+			require.NoError(t, masterRdb.Set(ctx, "k1", "v1", 0).Err())
+			require.NoError(t, masterRdb.Wait(ctx, 1, 0).Err())
 			done <- true
 		}()
 
@@ -97,8 +97,8 @@ func TestWaitCommand(t *testing.T) {
 		// Start a goroutine to execute WAIT
 		done := make(chan bool, 1)
 		go func() {
-			require.NoError(t, masterRdb.Do(ctx, "SET", "k1", "v1").Err())
-			require.NoError(t, masterRdb.Do(ctx, "WAIT", "1").Err())
+			require.NoError(t, masterRdb.Set(ctx, "k1", "v1", 0).Err())
+			require.NoError(t, masterRdb.Wait(ctx, 1, 0).Err())
 			done <- true
 		}()
 
