@@ -345,7 +345,9 @@ class CommandDBName : public Commander {
   }
 };
 
-class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
+class CommandWait : public Commander,
+                    private EventCallbackBase<CommandWait>,
+                    private EvbufCallbackBase<CommandWait, false> {
  public:
   Status Parse(const std::vector<std::string> &args) override {
     auto num_replicas_result = ParseInt<int64_t>(args[1], 10);
@@ -387,7 +389,8 @@ class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
     srv->BlockOnWait(conn, current_seq, num_replicas_);
 
     // Disable read event so the connection will not process any other commands
-    bufferevent_disable(conn->GetBufferEvent(), EV_READ);
+    // Disable write event so the connection will not send response
+    bufferevent_disable(conn->GetBufferEvent(), EV_READ | EV_WRITE);
 
     if (timeout_ > 0) {
       initTimer(conn, srv, current_seq, timeout_);
@@ -398,9 +401,33 @@ class CommandWait : public Commander, private EventCallbackBase<CommandWait> {
     return {Status::BlockingCmd};
   }
 
+  void OnWrite(bufferevent *bev) {
+    if (timer_ != nullptr) {
+      timer_.reset();
+    }
+
+    conn_->SetCB(bev);
+
+    bufferevent_enable(bev, EV_READ);
+    // We need to manually trigger the read event since we will stop processing commands
+    // in connection after the blocking command, so there may have some commands to be processed.
+    // Related issue: https://github.com/apache/kvrocks/issues/831
+    bufferevent_trigger(bev, EV_READ, BEV_TRIG_IGNORE_WATERMARKS);
+  }
+
   void TimerCB(int, int16_t) {
     timer_.reset();
     srv_->WakeupWaitConnection(conn_, target_seq_);
+  }
+
+  void OnEvent(bufferevent *bev, int16_t events) {
+    if (events & (BEV_EVENT_EOF | BEV_EVENT_ERROR)) {
+      if (timer_ != nullptr) {
+        timer_.reset();
+      }
+    }
+
+    conn_->OnEvent(bev, events);
   }
 
  private:
