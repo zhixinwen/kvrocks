@@ -123,7 +123,7 @@ func TestWaitCommand(t *testing.T) {
 	})
 }
 
-// When WAIT is executed, it should block future commands execution until the number of replicas that have reached the target sequence is reached.
+// When WAIT is executed, it should block future commands in the buffer until the number of replicas that have reached the target sequence is reached.
 func TestWaitBlockExecutingCommand(t *testing.T) {
 	// Start master server
 	masterSrv := util.StartServer(t, map[string]string{})
@@ -166,4 +166,8 @@ func TestWaitBlockExecutingCommand(t *testing.T) {
 
 	// the remaing command should be executed after replication
 	require.Equal(t, "v3", masterRdb.Get(context.Background(), "k1").Val())
+}
+
+func TestContinueExecutingCommandAfterWait(t *testing.T) {
+
 }
