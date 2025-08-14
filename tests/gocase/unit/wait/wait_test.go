@@ -125,6 +125,8 @@ func TestWaitCommand(t *testing.T) {
 
 // When WAIT is executed, it should block future commands in the buffer until the number of replicas that have reached the target sequence is reached.
 func TestWaitBlockExecutingCommand(t *testing.T) {
+	t.Parallel()
+
 	// Start master server
 	masterSrv := util.StartServer(t, map[string]string{})
 	defer masterSrv.Close()
@@ -134,14 +136,14 @@ func TestWaitBlockExecutingCommand(t *testing.T) {
 
 	// should be blocked after k1 is set
 	require.NoError(t, tcpClient.WriteArgs("SET", "k1", "v1"))
-	require.NoError(t, tcpClient.WriteArgs("WAIT", "1"))
+	require.NoError(t, tcpClient.WriteArgs("WAIT", "1", "0"))
 
 	// sleep for some time, so the commands are not read by a single read callback.
 	time.Sleep(1 * time.Second)
 
 	// should be blocked after k1 is set to v1
 	require.NoError(t, tcpClient.WriteArgs("SET", "k1", "v2"))
-	require.NoError(t, tcpClient.WriteArgs("WAIT", "1"))
+	require.NoError(t, tcpClient.WriteArgs("WAIT", "1", "0"))
 
 	time.Sleep(1 * time.Second)
 
@@ -168,6 +170,56 @@ func TestWaitBlockExecutingCommand(t *testing.T) {
 	require.Equal(t, "v3", masterRdb.Get(context.Background(), "k1").Val())
 }
 
+// if a command is blocked by WAIT, it should continue to execute after the WAIT command is completed.
 func TestContinueExecutingCommandAfterWait(t *testing.T) {
+	t.Parallel()
 
+	// Start master server
+	masterSrv := util.StartServer(t, map[string]string{})
+	// defer masterSrv.Close()
+
+	// Start slave server
+	slaveSrv := util.StartServer(t, map[string]string{})
+	// defer slaveSrv.Close()
+
+	masterRdb := masterSrv.NewClient()
+	defer func() { require.NoError(t, masterRdb.Close()) }()
+
+	slaveRdb := slaveSrv.NewClient()
+	defer func() { require.NoError(t, slaveRdb.Close()) }()
+
+	ctx := context.Background()
+	// Set up initial value
+	require.NoError(t, masterRdb.Set(ctx, "k1", "v1", 0).Err())
+	go func() {
+		time.Sleep(1 * time.Second)
+		util.SlaveOf(t, slaveRdb, masterSrv)
+	}()
+	// this command should be blocked until the slave is connected
+	require.NoError(t, masterRdb.Wait(ctx, 1, 0).Err())
+
+	require.Equal(t, "v1", masterRdb.Get(ctx, "k1").Val())
+
+	// additional command should be executed
+	require.NoError(t, masterRdb.Set(ctx, "k1", "v2", 0).Err())
+	require.Equal(t, "v2", masterRdb.Get(ctx, "k1").Val())
+
+	// Disconnect the slave
+	require.NoError(t, slaveRdb.Do(ctx, "SLAVEOF", "NO", "ONE").Err())
+
+	// set another value
+	require.NoError(t, masterRdb.Set(ctx, "k1", "v3", 0).Err())
+	// this command would time timeout
+	require.NoError(t, masterRdb.Wait(ctx, 1, 1000*time.Millisecond).Err())
+
+	require.Equal(t, "v3", masterRdb.Get(ctx, "k1").Val())
+	require.NoError(t, masterRdb.Set(ctx, "k1", "v4", 0).Err())
+	require.Equal(t, "v4", masterRdb.Get(ctx, "k1").Val())
+
+	// reconnect the slave
+	util.SlaveOf(t, slaveRdb, masterSrv)
+	util.WaitForOffsetSync(t, masterRdb, slaveRdb, 5*time.Second)
+
+	// slave should get the latest value
+	require.Equal(t, "v4", slaveRdb.Get(ctx, "k1").Val())
 }

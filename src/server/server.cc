@@ -769,7 +769,7 @@ void Server::cleanupWaitConnection(redis::Connection *conn) {
     }
   }
 
-  if (erased_count > 0) {
+  if (erased_count > 1) {
     warn("[server] {} wait contexts found for connection with fd {}, expect 1", erased_count, conn->GetFD());
   }
 }
