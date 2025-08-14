@@ -122,3 +122,48 @@ func TestWaitCommand(t *testing.T) {
 		}
 	})
 }
+
+// When WAIT is executed, it should block future commands execution until the number of replicas that have reached the target sequence is reached.
+func TestWaitBlockExecutingCommand(t *testing.T) {
+	// Start master server
+	masterSrv := util.StartServer(t, map[string]string{})
+	defer masterSrv.Close()
+
+	tcpClient := masterSrv.NewTCPClient()
+	defer func() { require.NoError(t, tcpClient.Close()) }()
+
+	// should be blocked after k1 is set
+	require.NoError(t, tcpClient.WriteArgs("SET", "k1", "v1"))
+	require.NoError(t, tcpClient.WriteArgs("WAIT", "1"))
+
+	// sleep for some time, so the commands are not read by a single read callback.
+	time.Sleep(1 * time.Second)
+
+	// should be blocked after k1 is set to v1
+	require.NoError(t, tcpClient.WriteArgs("SET", "k1", "v2"))
+	require.NoError(t, tcpClient.WriteArgs("WAIT", "1"))
+
+	time.Sleep(1 * time.Second)
+
+	require.NoError(t, tcpClient.WriteArgs("SET", "k1", "v3"))
+
+	masterRdb := masterSrv.NewClient()
+	defer func() { require.NoError(t, masterRdb.Close()) }()
+
+	// only the first command should be executed
+	require.Equal(t, "v1", masterRdb.Get(context.Background(), "k1").Val())
+
+	// Start slave server
+	slaveSrv := util.StartServer(t, map[string]string{})
+	defer slaveSrv.Close()
+
+	slaveRdb := slaveSrv.NewClient()
+	defer func() { require.NoError(t, slaveRdb.Close()) }()
+
+	// Set up replication
+	util.SlaveOf(t, slaveRdb, masterSrv)
+	util.WaitForOffsetSync(t, masterRdb, slaveRdb, 5*time.Second)
+
+	// the remaing command should be executed after replication
+	require.Equal(t, "v3", masterRdb.Get(context.Background(), "k1").Val())
+}
