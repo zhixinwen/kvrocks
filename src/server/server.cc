@@ -722,9 +722,9 @@ void Server::WakeupWaitConnections(rocksdb::SequenceNumber seq) {
       // Send the response with the number of replicas that have reached the target sequence
       it->second.conn->Reply(redis::Integer(reached_replicas));
 
-      auto s = it->second.conn->Owner()->EnableReadEvent(it->second.conn->GetFD());
+      auto s = it->second.conn->Owner()->EnableWriteEvent(it->second.conn->GetFD());
       if (!s.IsOK()) {
-        error("[server] Failed to enable read event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
+        error("[server] Failed to enable write event on WAIT connection {}: {}", it->second.conn->GetFD(), s.Msg());
       }
       it = wait_contexts_.erase(it);
       DecrBlockedClientNum();
@@ -741,9 +741,9 @@ void Server::WakeupWaitConnection(redis::Connection *conn, rocksdb::SequenceNumb
   size_t reached_replicas = GetReplicasReachedSequence(seq);
   conn->Reply(redis::Integer(reached_replicas));
 
-  auto s = conn->Owner()->EnableReadEvent(conn->GetFD());
+  auto s = conn->Owner()->EnableWriteEvent(conn->GetFD());
   if (!s.IsOK()) {
-    error("[server] Failed to enable read event on WAIT connection {}: {}", conn->GetFD(), s.Msg());
+    error("[server] Failed to enable write event on WAIT connection {}: {}", conn->GetFD(), s.Msg());
   }
 }
 
