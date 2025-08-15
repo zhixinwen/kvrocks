@@ -22,7 +22,6 @@
 #include "error_constants.h"
 #include "event_util.h"
 #include "io_util.h"
-#include "logging.h"
 #include "scope_exit.h"
 #include "server/redis_reply.h"
 #include "server/server.h"
@@ -423,6 +422,9 @@ class CommandWait : public Commander,
 
   void TimerCB(int, int16_t) {
     timer_.reset();
+    // Wake up the connection upon timeout.
+    // WakeupWaitConnection will hold the lock of the connection during the execution,
+    // holding the lock is necessary to avoid race condition that timeout and replication ack happen at the same time.
     srv_->WakeupWaitConnection(conn_, target_seq_);
   }
 
