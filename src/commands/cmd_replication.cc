@@ -399,7 +399,7 @@ class CommandWait : public Commander,
     bufferevent_disable(conn->GetBufferEvent(), EV_READ | EV_WRITE);
 
     if (timeout_ > 0) {
-      initTimer( srv, current_seq, timeout_);
+      initTimer(srv, current_seq, timeout_);
     }
 
     // The connection will be woken up by WakeupWaitConnections when enough replicas
@@ -446,7 +446,6 @@ class CommandWait : public Commander,
   // variables used for all cases
   uint64_t num_replicas_ = 0;
   Connection *conn_ = nullptr;
-
 
   void initTimer(Server *srv, rocksdb::SequenceNumber target_seq, int64_t timeout) {
     // init related instance variables
