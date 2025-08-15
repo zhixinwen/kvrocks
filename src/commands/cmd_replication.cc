@@ -363,7 +363,7 @@ class CommandWait : public Commander,
       return {Status::RedisParseErr, "timeout should be a non-negative integer"};
     }
 
-    timeout_ = *timeout_result;
+    timeout_ = *timeout_result * 1000;
 
     return Commander::Parse(args);
   }
