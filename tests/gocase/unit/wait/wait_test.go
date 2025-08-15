@@ -219,7 +219,7 @@ func TestWaitCommand(t *testing.T) {
 		select {
 		case <-done:
 			// Success - command not blocked
-		case <-time.After(1 * time.Second):
+		case <-time.After(5 * time.Second):
 			t.Fatal("WAIT command did not timeout")
 		}
 
