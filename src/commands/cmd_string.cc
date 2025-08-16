@@ -310,6 +310,8 @@ class CommandSet : public Commander {
   }
 
   Status Execute(engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    info("[connection] SET command executed: conn={}", conn->GetAddr());
+    
     std::optional<std::string> ret;
     redis::String string_db(srv->storage, conn->GetNamespace());
 

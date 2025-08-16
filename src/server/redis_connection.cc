@@ -81,10 +81,21 @@ void Connection::Close() {
 void Connection::Detach() { owner_->DetachConnection(this); }
 
 void Connection::OnRead([[maybe_unused]] struct bufferevent *bev) {
+  
   is_running_ = true;
   MakeScopeExit([this] { is_running_ = false; });
 
   SetLastInteraction();
+  
+  // Log bufferevent content
+  auto input_buffer = Input();
+  size_t buffer_length = evbuffer_get_length(input_buffer);
+  if (buffer_length > 0) {
+    auto data = evbuffer_pullup(input_buffer, -1);
+    std::string content(reinterpret_cast<const char*>(data), buffer_length);
+    info("[connection] Bufferevent content from {}: length={}, content='{}'", GetAddr(), buffer_length, content);
+  }
+  
   auto s = req_.Tokenize(Input());
   if (!s.IsOK()) {
     EnableFlag(redis::Connection::kCloseAfterReply);
