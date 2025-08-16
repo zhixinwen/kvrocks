@@ -42,11 +42,14 @@
 #include "server/server.h"
 #include "sha1.h"
 #include "storage/storage.h"
+#include "string_util.h"
 
 /* The maximum number of characters needed to represent a long double
  * as a string (long double has a huge range).
  * This should be the size of the buffer given to doule to string */
 constexpr size_t MAX_LONG_DOUBLE_CHARS = 5 * 1024;
+
+constexpr int64_t LUA_GC_CYCLE_PERIOD = 50;
 
 enum {
   LL_DEBUG = 0,
@@ -442,7 +445,6 @@ Status FunctionCall(redis::Connection *conn, engine::Context *ctx, const std::st
    * The call is performed every LUA_GC_CYCLE_PERIOD executed commands
    * (and for LUA_GC_CYCLE_PERIOD collection steps) because calling it
    * for every command uses too much CPU. */
-  constexpr int64_t LUA_GC_CYCLE_PERIOD = 50;
   static int64_t gc_count = 0;
 
   gc_count++;
@@ -613,6 +615,22 @@ Status FunctionDelete(engine::Context &ctx, redis::Connection *conn, const std::
   return Status::OK();
 }
 
+Status FunctionFlush(redis::Connection *conn, engine::Context *ctx) {
+  auto storage = conn->GetServer()->storage;
+  auto cf = storage->GetCFHandle(ColumnFamilyID::Propagate);
+
+  auto s = storage->DeleteRange(*ctx, rocksdb::WriteOptions(), cf, engine::kLuaLibCodePrefix,
+                                util::StringNext(engine::kLuaLibCodePrefix));
+  if (!s.ok()) return {Status::NotOK, s.ToString()};
+
+  s = storage->DeleteRange(*ctx, rocksdb::WriteOptions(), cf, engine::kLuaFuncLibPrefix,
+                           util::StringNext(engine::kLuaFuncLibPrefix));
+  if (!s.ok()) return {Status::NotOK, s.ToString()};
+
+  conn->GetServer()->ScriptReset();
+  return Status::OK();
+}
+
 Status EvalGenericCommand(redis::Connection *conn, engine::Context *ctx, const std::string &body_or_sha,
                           const std::vector<std::string> &keys, const std::vector<std::string> &argv, bool evalsha,
                           std::string *output, bool read_only) {
@@ -709,7 +727,6 @@ Status EvalGenericCommand(redis::Connection *conn, engine::Context *ctx, const s
    * The call is performed every LUA_GC_CYCLE_PERIOD executed commands
    * (and for LUA_GC_CYCLE_PERIOD collection steps) because calling it
    * for every command uses too much CPU. */
-  constexpr int64_t LUA_GC_CYCLE_PERIOD = 50;
   static int64_t gc_count = 0;
 
   gc_count++;
