@@ -774,16 +774,6 @@ void Server::cleanupWaitConnection(redis::Connection *conn) {
   }
 }
 
-bool Server::IsConnectionWaiting(redis::Connection *conn) {
-  std::shared_lock<std::shared_mutex> guard(wait_contexts_mu_);
-  for (const auto &wait_context : wait_contexts_) {
-    if (wait_context.second.conn == conn) {
-      return true;
-    }
-  }
-  return false;
-}
-
 size_t Server::GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq) {
   std::shared_lock<std::shared_mutex> slave_guard(slave_threads_mu_);
   size_t reached_replicas = 0;
