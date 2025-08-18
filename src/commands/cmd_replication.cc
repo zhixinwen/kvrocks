@@ -368,6 +368,8 @@ class CommandWait : public Commander,
   }
 
   Status Execute([[maybe_unused]] engine::Context &ctx, Server *srv, Connection *conn, std::string *output) override {
+    info("[connection] WAIT command executed: conn={}", conn->GetAddr());
+    
     // Only master can execute WAIT command
     if (srv->IsSlave()) {
       return {Status::RedisExecErr, "WAIT command can only be executed on master"};
@@ -408,6 +410,7 @@ class CommandWait : public Commander,
   }
 
   void OnWrite(bufferevent *bev) {
+    // Before unblocking, we must confirm that the wait condition has actually been met or that a timeout occurred.
     // Ideally, write callback is called after WAIT response is sent, but it may be called for previous commands.
     // so we need to check if the connection is still waiting.
     // For example, considering the following scenario:
@@ -415,9 +418,15 @@ class CommandWait : public Commander,
     // 2. WAIT 1 0
     // 3. SET k1 v2
     // After WAIT 1 0 is executed, the connection is blocked, and the write callback is called for SET k1 v1.
-    // If we don't check if the connection is still waiting, the connection will enable read event and process SET k1 v2.
-    if (!srv_->IsConnectionWaiting(conn_)) {
-      return;
+    size_t reached_replicas = srv_->GetReplicasReachedSequence(target_seq_);
+    bool wait_condition_met = (reached_replicas >= num_replicas_);
+
+    // The timer is reset in the TimerCB before the connection is woken up.
+    // If the timer is null, it means we were woken up by a timeout.
+    bool timed_out = (timeout_ > 0 && timer_ == nullptr);
+
+    if (!wait_condition_met && !timed_out) {
+      return;  // This is a premature write, so we do nothing and keep the connection blocked.
     }
 
     if (timer_ != nullptr) {

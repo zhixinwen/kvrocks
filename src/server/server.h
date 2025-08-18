@@ -234,9 +234,8 @@ class Server {
   void BlockOnWait(redis::Connection *conn, rocksdb::SequenceNumber target_seq, uint64_t num_replicas);
   void WakeupWaitConnections(rocksdb::SequenceNumber seq);
   void CleanupWaitConnection(redis::Connection *conn);
-  void WakeupWaitConnection(redis::Connection *conn, rocksdb::SequenceNumber seq);
-  bool IsConnectionWaiting(redis::Connection *conn);
-
+  void WakeupWaitConnection(redis::Connection *conn, rocksdb::SequenceNumber seq);  
+  
   // Helper methods for WAIT command
   size_t GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq);
   // Return the largest wait_context.target_seq that can wakeup given the seq.
