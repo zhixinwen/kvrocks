@@ -235,6 +235,7 @@ class Server {
   void WakeupWaitConnections(rocksdb::SequenceNumber seq);
   void CleanupWaitConnection(redis::Connection *conn);
   void WakeupWaitConnection(redis::Connection *conn, rocksdb::SequenceNumber seq);
+  bool IsConnectionWaiting(redis::Connection *conn);
 
   // Helper methods for WAIT command
   size_t GetReplicasReachedSequence(rocksdb::SequenceNumber target_seq);
