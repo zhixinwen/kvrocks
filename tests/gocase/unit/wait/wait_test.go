@@ -275,7 +275,7 @@ func TestWaitBlockExecutingCommand(t *testing.T) {
 	util.SlaveOf(t, slaveRdb, masterSrv)
 	util.WaitForOffsetSync(t, masterRdb, slaveRdb, 5*time.Second)
 
-	// the remaing command should be executed after replication
+	// the remaining command should be executed after replication
 	require.Equal(t, "v3", masterRdb.Get(context.Background(), "k1").Val())
 }
 
