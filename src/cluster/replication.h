@@ -42,6 +42,7 @@
 #include "storage/storage.h"
 
 class Server;
+class ReplicationThread;
 
 enum ReplState {
   kReplConnecting = 1,
@@ -119,7 +120,7 @@ class BatchWriter {
     BatchItem(BatchType t, rocksdb::WriteBatch b) : type(t), batch(std::move(b)) {}
   };
 
-  explicit BatchWriter(engine::Storage *storage, bufferevent *bev);
+  explicit BatchWriter(engine::Storage *storage, bufferevent *bev, Server *srv);
   ~BatchWriter();
 
   // Non-copyable, non-movable
@@ -137,6 +138,8 @@ class BatchWriter {
   void Stop();
 
  private:
+  // Parse write batch for special handling (publish, propagate, etc.)
+  Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
   void run();
   void sendAck();
 
@@ -154,6 +157,9 @@ class BatchWriter {
 
   // Write options for all batches
   rocksdb::WriteOptions write_opts_;
+
+  // Pointer to Server for parsing batches
+  Server *srv_;
 };
 
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
@@ -278,8 +284,6 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   static bool isUnknownOption(std::string_view err);
 
   void sendReplConfAck(bufferevent *bev, bool force = false);
-
-  Status parseWriteBatch(const rocksdb::WriteBatch &write_batch);
 };
 
 /*

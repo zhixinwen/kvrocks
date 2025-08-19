@@ -389,7 +389,7 @@ void ReplicationThread::CallbacksStateMachine::Start() {
   if (repl_->batch_writer_) {
     repl_->batch_writer_->Stop();
   }
-  repl_->batch_writer_ = std::make_unique<BatchWriter>(repl_->storage_, bev);
+  repl_->batch_writer_ = std::make_unique<BatchWriter>(repl_->storage_, bev, repl_->srv_);
   auto s = repl_->batch_writer_->Start();
   if (!s.IsOK()) {
     error("[replication] Failed to start BatchWriter: {}", s.Msg());
@@ -740,15 +740,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         rocksdb::WriteBatch batch(std::move(bulk_string));
 
         // Use BatchWriter for asynchronous RocksDB writes
-        // Parse the write batch for special handling (publish, propagate, etc.)
-        auto s = parseWriteBatch(batch);
-        if (!s.IsOK()) {
-          error("[replication] CRITICAL - failed to parse write batch 0x{}: {}", util::StringToHex(batch.Data()),
-                s.Msg());
-          return CBState::RESTART;
-        }
-
-        s = batch_writer_->AddBatch(BatchWriter::BatchType::NORMAL, std::move(batch));
+        auto s = batch_writer_->AddBatch(BatchWriter::BatchType::NORMAL, std::move(batch));
         if (!s.IsOK()) {
           error("[replication] Failed to add batch to BatchWriter: {}", s.Msg());
           return CBState::RESTART;
@@ -1127,48 +1119,6 @@ void ReplicationThread::TimerCB(int, int16_t) {
   }
 }
 
-Status ReplicationThread::parseWriteBatch(const rocksdb::WriteBatch &write_batch) {
-  WriteBatchHandler write_batch_handler;
-
-  auto db_status = write_batch.Iterate(&write_batch_handler);
-  if (!db_status.ok()) return {Status::NotOK, "failed to iterate over write batch: " + db_status.ToString()};
-
-  switch (write_batch_handler.Type()) {
-    case kBatchTypePublish:
-      srv_->PublishMessage(write_batch_handler.Key(), write_batch_handler.Value());
-      break;
-    case kBatchTypePropagate:
-      if (write_batch_handler.Key() == engine::kPropagateScriptCommand) {
-        std::vector<std::string> tokens = util::TokenizeRedisProtocol(write_batch_handler.Value());
-        if (!tokens.empty()) {
-          auto s = srv_->ExecPropagatedCommand(tokens);
-          if (!s.IsOK()) {
-            return s.Prefixed("failed to execute propagate command");
-          }
-        }
-      } else if (write_batch_handler.Key() == kNamespaceDBKey) {
-        auto s = srv_->GetNamespace()->LoadAndRewrite();
-        if (!s.IsOK()) {
-          return s.Prefixed("failed to load namespaces");
-        }
-      }
-      break;
-    case kBatchTypeStream: {
-      auto key = write_batch_handler.Key();
-      InternalKey ikey(key, storage_->IsSlotIdEncoded());
-      Slice entry_id = ikey.GetSubKey();
-      redis::StreamEntryID id;
-      GetFixed64(&entry_id, &id.ms);
-      GetFixed64(&entry_id, &id.seq);
-      srv_->OnEntryAddedToStream(ikey.GetNamespace().ToString(), ikey.GetKey().ToString(), id);
-      break;
-    }
-    case kBatchTypeNone:
-      break;
-  }
-  return Status::OK();
-}
-
 bool ReplicationThread::isRestoringError(std::string_view err) {
   // err doesn't contain the CRLF, so cannot use redis::Error here.
   return err == RESP_PREFIX_ERROR + redis::StatusToRedisErrorMsg({Status::RedisLoading, redis::errRestoringBackup});
@@ -1204,8 +1154,8 @@ rocksdb::Status WriteBatchHandler::PutCF(uint32_t column_family_id, const rocksd
 }
 
 // BatchWriter implementation
-BatchWriter::BatchWriter(engine::Storage *storage, bufferevent *bev)
-    : storage_(storage), bev_(bev), write_opts_(storage->DefaultWriteOptions()) {
+BatchWriter::BatchWriter(engine::Storage *storage, bufferevent *bev, Server *srv)
+    : storage_(storage), bev_(bev), write_opts_(storage->DefaultWriteOptions()), srv_(srv) {
   batch_queue_.set_capacity(kMaxQueueSize);
 
   // Adjust write options for replication group sync
@@ -1292,6 +1242,15 @@ void BatchWriter::run() {
           error_flag_.store(true, std::memory_order_relaxed);
           return;
         }
+
+        // Parse the write batch for special handling (publish, propagate, etc.)
+        s = parseWriteBatch(item.batch);
+        if (!s.IsOK()) {
+          error("[replication] CRITICAL - failed to parse write batch 0x{}: {}", util::StringToHex(item.batch.Data()),
+                s.Msg());
+          error_flag_.store(true, std::memory_order_relaxed);
+          return;
+        }
       } else if (item.type == BatchType::GETACK) {
         // Send ack immediately for _getack command
         sendAck();
@@ -1302,6 +1261,48 @@ void BatchWriter::run() {
       break;
     }
   }
+}
+
+Status BatchWriter::parseWriteBatch(const rocksdb::WriteBatch &write_batch) {
+  WriteBatchHandler write_batch_handler;
+
+  auto db_status = write_batch.Iterate(&write_batch_handler);
+  if (!db_status.ok()) return {Status::NotOK, "failed to iterate over write batch: " + db_status.ToString()};
+
+  switch (write_batch_handler.Type()) {
+    case kBatchTypePublish:
+      srv_->PublishMessage(write_batch_handler.Key(), write_batch_handler.Value());
+      break;
+    case kBatchTypePropagate:
+      if (write_batch_handler.Key() == engine::kPropagateScriptCommand) {
+        std::vector<std::string> tokens = util::TokenizeRedisProtocol(write_batch_handler.Value());
+        if (!tokens.empty()) {
+          auto s = srv_->ExecPropagatedCommand(tokens);
+          if (!s.IsOK()) {
+            return s.Prefixed("failed to execute propagate command");
+          }
+        }
+      } else if (write_batch_handler.Key() == kNamespaceDBKey) {
+        auto s = srv_->GetNamespace()->LoadAndRewrite();
+        if (!s.IsOK()) {
+          return s.Prefixed("failed to load namespaces");
+        }
+      }
+      break;
+    case kBatchTypeStream: {
+      auto key = write_batch_handler.Key();
+      InternalKey ikey(key, storage_->IsSlotIdEncoded());
+      Slice entry_id = ikey.GetSubKey();
+      redis::StreamEntryID id;
+      GetFixed64(&entry_id, &id.ms);
+      GetFixed64(&entry_id, &id.seq);
+      srv_->OnEntryAddedToStream(ikey.GetNamespace().ToString(), ikey.GetKey().ToString(), id);
+      break;
+    }
+    case kBatchTypeNone:
+      break;
+  }
+  return Status::OK();
 }
 
 void BatchWriter::sendAck() {
