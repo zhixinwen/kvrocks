@@ -384,10 +384,25 @@ void ReplicationThread::CallbacksStateMachine::Start() {
     SetReadCB(bev, EventCallbackFunc<&CallbacksStateMachine::ReadWriteCB>);
   }
   bev_ = bev;
+
+  // Initialize BatchWriter for asynchronous RocksDB writes
+  if (repl_->batch_writer_) {
+    repl_->batch_writer_->Stop();
+  }
+  repl_->batch_writer_ = std::make_unique<BatchWriter>(repl_->storage_, bev);
+  auto s = repl_->batch_writer_->Start();
+  if (!s.IsOK()) {
+    error("[replication] Failed to start BatchWriter: {}", s.Msg());
+    return;
+  }
 }
 
 void ReplicationThread::CallbacksStateMachine::Stop() {
   if (bev_) {
+    // Stop BatchWriter before freeing the bufferevent
+    if (repl_->batch_writer_) {
+      repl_->batch_writer_->Stop();
+    }
     bufferevent_free(bev_);
     bev_ = nullptr;
   }
@@ -446,6 +461,12 @@ void ReplicationThread::Stop() {
 
   stop_flag_ = true;  // Stopping procedure is asynchronous,
                       // handled by timer
+
+  // Stop BatchWriter if it exists
+  if (batch_writer_) {
+    batch_writer_->Stop();
+  }
+
   if (auto s = util::ThreadJoin(t_); !s) {
     warn("Replication thread operation failed: {}", s.Msg());
   }
@@ -655,9 +676,14 @@ void ReplicationThread::sendReplConfAck(bufferevent *bev, bool force) {
 
 ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *bev) {
   repl_state_.store(kReplConnected, std::memory_order_relaxed);
+
+  // Check if BatchWriter has an error
+  if (batch_writer_ && batch_writer_->HasError()) {
+    error("[replication] BatchWriter is in error state, restarting replication");
+    return CBState::RESTART;
+  }
+
   auto input = bufferevent_get_input(bev);
-  bool data_written = false;
-  bool force_ack = false;
   // Use replication-group-sync logic if enabled and rocksdb.write_options.sync is true
   rocksdb::WriteOptions write_opts = storage_->DefaultWriteOptions();
   if (replication_group_sync_) {
@@ -670,9 +696,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
         // Read bulk length
         UniqueEvbufReadln line(input, EVBUFFER_EOL_CRLF_STRICT);
         if (!line) {
-          if (data_written) {
-            sendReplConfAck(bev, force_ack);
-          }
           return CBState::AGAIN;
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
@@ -686,9 +709,6 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
       case Incr_batch_data:
         // Read bulk data (batch data)
         if (incr_bulk_len_ + 2 > evbuffer_get_length(input)) {  // If data not enough
-          if (data_written) {
-            sendReplConfAck(bev, force_ack);
-          }
           // set a watermark so the callback won't be called again until the data is enough
           bufferevent_setwatermark(bev, EV_READ, incr_bulk_len_ + 2, 0);
           return CBState::AGAIN;
@@ -702,34 +722,35 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
 
         if (bulk_string == "ping") {
           // master would send the ping heartbeat packet to check whether the slave was alive or not,
-          // don't write ping to db here.
-          if (data_written) {
-            sendReplConfAck(bev, force_ack);
-          }
+          // don't write ping to db here, just ignore it.
           return CBState::AGAIN;
         }
 
         if (bulk_string == "_getack") {
           // master would send the _getack command to the master to get acknowledgment
           // don't write _getack to db here.
-          force_ack = true;
+          auto s = batch_writer_->AddBatch(BatchWriter::BatchType::GETACK, rocksdb::WriteBatch());
+          if (!s.IsOK()) {
+            error("[replication] Failed to add _getack to BatchWriter: {}", s.Msg());
+            return CBState::RESTART;
+          }
           continue;
         }
 
         rocksdb::WriteBatch batch(std::move(bulk_string));
 
-        auto s = storage_->ReplicaApplyWriteBatch(&batch, write_opts);
-        if (!s.IsOK()) {
-          error("[replication] CRITICAL - Failed to write batch to local, {}. batch: 0x{}", s.Msg(),
-                util::StringToHex(batch.Data()));
-          return CBState::RESTART;
-        }
-        data_written = true;
-
-        s = parseWriteBatch(batch);
+        // Use BatchWriter for asynchronous RocksDB writes
+        // Parse the write batch for special handling (publish, propagate, etc.)
+        auto s = parseWriteBatch(batch);
         if (!s.IsOK()) {
           error("[replication] CRITICAL - failed to parse write batch 0x{}: {}", util::StringToHex(batch.Data()),
                 s.Msg());
+          return CBState::RESTART;
+        }
+
+        s = batch_writer_->AddBatch(BatchWriter::BatchType::NORMAL, std::move(batch));
+        if (!s.IsOK()) {
+          error("[replication] Failed to add batch to BatchWriter: {}", s.Msg());
           return CBState::RESTART;
         }
 
@@ -1180,4 +1201,119 @@ rocksdb::Status WriteBatchHandler::PutCF(uint32_t column_family_id, const rocksd
     return rocksdb::Status::OK();
   }
   return rocksdb::Status::OK();
+}
+
+// BatchWriter implementation
+BatchWriter::BatchWriter(engine::Storage *storage, bufferevent *bev)
+    : storage_(storage), bev_(bev), write_opts_(storage->DefaultWriteOptions()) {
+  batch_queue_.set_capacity(kMaxQueueSize);
+
+  // Adjust write options for replication group sync
+  if (storage_->GetConfig()->replication_group_sync && storage_->GetConfig()->rocks_db.write_options.sync) {
+    write_opts_.sync = false;
+  }
+}
+
+BatchWriter::~BatchWriter() { Stop(); }
+
+Status BatchWriter::Start() {
+  if (writer_thread_.joinable()) {
+    return {Status::NotOK, "BatchWriter already started"};
+  }
+
+  stop_flag_.store(false, std::memory_order_relaxed);
+  error_flag_.store(false, std::memory_order_relaxed);
+
+  auto s = util::CreateThread("batch-writer", [this] { this->run(); });
+
+  if (s) {
+    writer_thread_ = std::move(*s);
+    return Status::OK();
+  }
+
+  return {Status::NotOK, "Failed to create batch writer thread"};
+}
+
+void BatchWriter::Stop() {
+  stop_flag_.store(true, std::memory_order_relaxed);
+
+  if (writer_thread_.joinable()) {
+    writer_thread_.join();
+  }
+
+  // Clear the queue on shutdown
+  BatchItem item(BatchType::NORMAL, rocksdb::WriteBatch());
+  while (batch_queue_.try_pop(item)) {
+    // Drop all pending items
+  }
+}
+
+Status BatchWriter::AddBatch(BatchType type, rocksdb::WriteBatch batch) {
+  if (error_flag_.load(std::memory_order_relaxed)) {
+    return {Status::NotOK, "BatchWriter is in error state"};
+  }
+
+  if (stop_flag_.load(std::memory_order_relaxed)) {
+    return {Status::NotOK, "BatchWriter is stopping"};
+  }
+
+  BatchItem item(type, std::move(batch));
+
+  // Block and wait when queue is full - this provides natural backpressure
+  batch_queue_.push(std::move(item));
+
+  return Status::OK();
+}
+
+void BatchWriter::run() {
+  BatchItem item(BatchType::NORMAL, rocksdb::WriteBatch());
+  auto now = util::GetTimeStamp();
+  last_ack_time_secs_ = now;
+
+  while (!stop_flag_.load(std::memory_order_relaxed)) {
+    // Check if we need to send periodic ack first
+    now = util::GetTimeStamp();
+    auto last_ack = last_ack_time_secs_;
+    if (now - last_ack >= kAckIntervalSecs) {
+      sendAck();
+      last_ack_time_secs_ = now;
+    }
+
+    // Block and wait for a batch to process
+    try {
+      batch_queue_.pop(item);
+
+      // Process the batch
+      if (item.type == BatchType::NORMAL) {
+        auto s = storage_->ReplicaApplyWriteBatch(&item.batch, write_opts_);
+        if (!s.IsOK()) {
+          error("[replication] CRITICAL - Failed to write batch to local, {}. batch: 0x{}", s.Msg(),
+                util::StringToHex(item.batch.Data()));
+          error_flag_.store(true, std::memory_order_relaxed);
+          return;
+        }
+      } else if (item.type == BatchType::GETACK) {
+        // Send ack immediately for _getack command
+        sendAck();
+        last_ack_time_secs_ = util::GetTimeStamp();
+      }
+    } catch (tbb::user_abort &e) {
+      // Queue was aborted, exit the loop
+      break;
+    }
+  }
+}
+
+void BatchWriter::sendAck() {
+  if (bev_ != nullptr) {
+    // If replication_group_sync_ is enabled, sync WAL before sending ack
+    if (storage_->GetConfig()->replication_group_sync && storage_->GetConfig()->rocks_db.write_options.sync) {
+      auto s = storage_->SyncWAL();
+      if (!s.IsOK()) {
+        error("[replication] Failed to sync WAL before ack: {}", s.Msg());
+        return;
+      }
+    }
+    SendString(bev_, redis::ArrayOfBulkStrings({"replconf", "ack", std::to_string(storage_->LatestSeqNumber())}));
+  }
 }

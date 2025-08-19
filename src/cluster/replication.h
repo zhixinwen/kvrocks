@@ -25,6 +25,7 @@
 #include <atomic>
 #include <chrono>
 #include <deque>
+#include <functional>
 #include <memory>
 #include <string>
 #include <thread>
@@ -34,6 +35,7 @@
 
 #include "event_util.h"
 #include "io_util.h"
+#include "oneapi/tbb/concurrent_queue.h"
 #include "rocksdb/write_batch.h"
 #include "server/redis_connection.h"
 #include "status.h"
@@ -97,6 +99,61 @@ class FeedSlaveThread {
   void readCallback(bufferevent *bev, void *ctx);
   static void staticReadCallback(bufferevent *bev, void *ctx);
   bool shouldSendGetAck(rocksdb::SequenceNumber seq);
+};
+
+/*
+ * BatchWriter handles asynchronous RocksDB writes for replication
+ * to avoid blocking the network read callback
+ */
+class BatchWriter {
+ public:
+  enum class BatchType {
+    NORMAL,  // Regular write batch
+    GETACK,  // _getack command
+  };
+
+  struct BatchItem {
+    BatchType type;
+    rocksdb::WriteBatch batch;
+
+    BatchItem(BatchType t, rocksdb::WriteBatch b) : type(t), batch(std::move(b)) {}
+  };
+
+  explicit BatchWriter(engine::Storage *storage, bufferevent *bev);
+  ~BatchWriter();
+
+  // Non-copyable, non-movable
+  BatchWriter(const BatchWriter &) = delete;
+  BatchWriter &operator=(const BatchWriter &) = delete;
+
+  // Add a batch to the queue (non-blocking)
+  Status AddBatch(BatchType type, rocksdb::WriteBatch batch);
+
+  // Check if there's an error
+  bool HasError() const { return error_flag_.load(std::memory_order_relaxed); }
+
+  // Start/stop the writer thread
+  Status Start();
+  void Stop();
+
+ private:
+  void run();
+  void sendAck();
+
+  engine::Storage *storage_;
+  bufferevent *bev_;
+  std::thread writer_thread_;
+  std::atomic<bool> stop_flag_{false};
+  std::atomic<bool> error_flag_{false};
+
+  static constexpr size_t kMaxQueueSize = 1000;
+  tbb::concurrent_bounded_queue<BatchItem> batch_queue_;
+
+  int64_t last_ack_time_secs_{0};
+  static constexpr int64_t kAckIntervalSecs = 1;
+
+  // Write options for all batches
+  rocksdb::WriteOptions write_opts_;
 };
 
 class ReplicationThread : private EventCallbackBase<ReplicationThread> {
@@ -192,6 +249,9 @@ class ReplicationThread : private EventCallbackBase<ReplicationThread> {
   using CBState = CallbacksStateMachine::State;
   CallbacksStateMachine psync_steps_;
   CallbacksStateMachine fullsync_steps_;
+
+  // Asynchronous batch writer for RocksDB writes
+  std::unique_ptr<BatchWriter> batch_writer_;
 
   void run();
 
