@@ -681,7 +681,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
             sendReplConfAck(bev, force_ack);
           }
           // We should reset the watermark to 0 to read the next RESP parts after reading a batch.
-          bufferevent_setwatermark(bev, EV_READ, 0, 0);          
+          bufferevent_setwatermark(bev, EV_READ, 0, 0);
           return CBState::AGAIN;
         }
         incr_bulk_len_ = line.length > 0 ? std::strtoull(line.get() + 1, nullptr, 10) : 0;
@@ -717,7 +717,7 @@ ReplicationThread::CBState ReplicationThread::incrementBatchLoopCB(bufferevent *
           // ack forever and the info command on master would report incorrect lag.
           sendReplConfAck(bev, force_ack);
           // We should reset the watermark to 0 to read the next RESP parts after reading a batch.
-          bufferevent_setwatermark(bev, EV_READ, 0, 0);          
+          bufferevent_setwatermark(bev, EV_READ, 0, 0);
           return CBState::AGAIN;
         }
 
